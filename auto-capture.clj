@@ -19,7 +19,7 @@
 (defn capture-screenshot []
   (let [filename (str (timestamp-str) ".png")
         path (str destination-folder filename)]
-    (shell "screencapture" path)))
+    (shell "screencapture" "-x" path)))
 
 ;; Main loop to take screenshots every 5 seconds
 (dotimes [_ 1000]
