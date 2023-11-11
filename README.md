@@ -1,6 +1,5 @@
 # hyperdeath
-A screen shot is taken every 5 seconds which is added to a temporal evolving DiHypergraph, the image is sent to gpt-4-vision in order to genreate a rich semantic label.  
-## Useage
+This project captures screenshots at regular 5-second intervals and integrates them into a dynamic DiHypergraph. Each captured image undergoes semantic label generation using the powerful gpt-4-vision model, enriching the data with meaningful context and information.## Usage
 Set openai key
 ```
 export OPEN_AI_KEY=""
