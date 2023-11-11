@@ -1,7 +1,9 @@
 (require '[babashka.curl :as curl])
 (require '[cheshire.core :as json])
+(require '[clojure.string :as str])
+(require '[clojure.java.io :as io])
 
-(def openai-api-key "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") ; replace with your actual OpenAI API key
+(def openai-api-key (System/getenv "OPENAI_API_KEY"))
 
 (defn post-chat-completion [image-url]
   (curl/post "https://api.openai.com/v1/chat/completions"
