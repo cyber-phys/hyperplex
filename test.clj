@@ -2,11 +2,12 @@
 (require '[cheshire.core :as json])
 (require '[clojure.string :as str])
 (require '[clojure.java.io :as io])
+(require '[clj-http.lite.client :as client])
 
 (def openai-api-key (System/getenv "OPENAI_API_KEY"))
 
 (defn post-chat-completion [image-url]
-  (curl/post "https://api.openai.com/v1/chat/completions"
+  (client/post "https://api.openai.com/v1/chat/completions"
              {:headers {"Content-Type" "application/json"
                         "Authorization" (str "Bearer " openai-api-key)}
 :body (json/generate-string {
