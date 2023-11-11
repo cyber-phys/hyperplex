@@ -3,10 +3,30 @@
 (require '[babashka.process :refer [shell]])
 (require '[cheshire.core :as json])
 (require '[clojure.java.io :as io])
+(require '[clj-http.lite.client :as client])
 (import '(java.util Base64 UUID)
          '(java.nio.file Files Paths)
          '(java.text SimpleDateFormat)
          '(java.util Date))
+
+(def openai-api-key (System/getenv "OPENAI_API_KEY"))
+
+;; Function to post base64 image frame to OpenAI API and return the response body
+(defn oai-image-description [frame]
+  (let [response (client/post "https://api.openai.com/v1/chat/completions"
+                              {:headers {"Content-Type" "application/json"
+                                         "Authorization" (str "Bearer " openai-api-key)}
+                               :body (json/generate-string {:model "gpt-4-vision-preview"
+                                                            :messages [{:role "user"
+                                                                        :content [{:type "text"
+                                                                                   :text "What’s in this image?"}
+                                                                                  {:type "image_url"
+                                                                                   :image_url {:url (str "data:image/jpeg;base64," frame)}}]}]
+                                                            :max_tokens 300})
+                               :throw false})]
+    (let [response-body (:body response)]
+      (println "Response body:" response-body)
+      response-body)))
 
 ;; Define the destination folder on the desktop
 (def destination-folder (str (System/getProperty "user.home") "/Desktop/screencapture/"))
@@ -57,24 +77,19 @@
         (println "Deleting temporary file:" temp-file)
         (shell "rm" "-f" temp-file)))))
 
-
-
 (defn update-hypergraph [base64-image]
-;;  (println "Updating hypergraph with new image...") ;; Debugging line
   (when (nil? base64-image)
     (println "No image data to update.")) ;; Check for nil Base64 string
   (let [hypergraph-path (str destination-folder "hypergraph.json")
         hypergraph (if (.exists (io/file hypergraph-path))
                      (json/parse-string (slurp hypergraph-path) true)
                      {:nodes [] :hyperedges []})
-        node {:id (uuid-v4) :type "screenshot" :data base64-image :time (timestamp-iso-str)}
+        node {:id (uuid-v4) :type "screenshot" :data base64-image :time (timestamp-iso-str) :description (oai-image-description base64-image)}
         updated-hypergraph (update hypergraph :nodes conj node)]
 ;;    (println "Saving updated hypergraph:" updated-hypergraph) ;; Debugging line
     (save-json-hypergraph updated-hypergraph hypergraph-path)))
-
 
 ;; Main loop to take screenshots every 5 seconds and save them as Base64 in a JSON hypergraph
 (dotimes [_ 1000]
   (update-hypergraph (capture-screenshot))
   (Thread/sleep 5000)) ;; Sleep for 5000 milliseconds or 5 seconds
-

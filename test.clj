@@ -1,4 +1,3 @@
-(require '[babashka.curl :as curl])
 (require '[cheshire.core :as json])
 (require '[clojure.string :as str])
 (require '[clojure.java.io :as io])
@@ -18,7 +17,6 @@
                               {:type "image_url"
                                :image_url {:url image-url}}]}]
         :max_tokens 300})
-
               :throw false}))
 
 (defn main []
@@ -30,4 +28,3 @@
       (println "Output:" (:choices body)))))
 
 (main)
-
