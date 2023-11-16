@@ -1,20 +1,26 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JSON Graph Visualization</title>
+    <title>Directed Hypergraph Visualization</title>
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style type="text/css">
         #visualization {
-            width: 600px;
-            height: 400px;
+            width: 800px;
+            height: 600px;
             border: 1px solid lightgray;
+            margin-bottom: 10px;
+        }
+        #info {
+            font-family: Arial, sans-serif;
+            margin-top: 5px;
         }
     </style>
 </head>
 <body>
 <div id="visualization"></div>
+<div id="info"></div>
 
-<input type="file" id="fileinput" />
+<input type="file" id="fileinput" accept=".json" />
 
 <script type="text/javascript">
     var nodes = null;
@@ -27,54 +33,79 @@
             nodes: nodes,
             edges: edges
         };
-        var options = {};
+        var options = {
+            nodes: {
+                shape: 'dot',
+                size: 20,
+                font: {
+                    size: 15
+                }
+            },
+            edges: {
+                arrows: 'to',
+                color: {
+                    color: '#848484',
+                    highlight: '#ff0000',
+                    hover: '#ff0000'
+                },
+                font: {
+                    size: 12,
+                    align: 'top'
+                }
+            },
+            interaction: { hover: true }
+        };
         network = new vis.Network(container, data, options);
-    }
 
-    function redraw() {
-        if (nodes) {
-            nodes.update(nodes.get());
-        }
-        if (edges) {
-            edges.update(edges.get());
-        }
-    }
-
-    function randomColor() {
-        var colors = ["red", "green", "blue", "purple", "orange", "yellow", "brown", "black", "white", "gray"];
-        return colors[Math.floor(Math.random() * colors.length)];
+        network.on("click", function (params) {
+            var info = document.getElementById('info');
+            if (params.nodes.length > 0) {
+                var node = nodes.get(params.nodes[0]);
+                info.innerHTML = 'Node: ' + node.label;
+            } else if (params.edges.length > 0) {
+                var edge = edges.get(params.edges[0]);
+                info.innerHTML = 'Edge: ' + edge.label;
+            } else {
+                info.innerHTML = '';
+            }
+        });
     }
 
     function updateGraph(json) {
-        var nodes_json = json["nodes"];
-        var edges_json = json["edges"];
+        try {
+            var nodes_json = json["nodes"];
+            var edges_json = json["edges"];
 
-        nodes = new vis.DataSet(nodes_json);
-        edges = new vis.DataSet(edges_json);
+            nodes = new vis.DataSet(nodes_json);
+            edges = new vis.DataSet(edges_json.map(function(edge) {
+                return { ...edge, arrows: 'to' };
+            }));
 
-        nodes.on('*', function () {
-            console.log('nodes event', arguments);
-            redraw();
-        });
-
-        edges.on('*', function () {
-            console.log('edges event', arguments);
-            redraw();
-        });
-
-        draw();
+            draw();
+        } catch (error) {
+            console.error('Error parsing JSON:', error);
+            alert('Invalid JSON file.');
+        }
     }
 
     function handleFileSelect(evt) {
         var files = evt.target.files;
-        var file = files[0];
+        if (files.length === 0) {
+            return;
+        }
 
+        var file = files[0];
         var reader = new FileReader();
 
         reader.onload = function (e) {
             var content = e.target.result;
-            var json = JSON.parse(content);
-            updateGraph(json);
+            try {
+                var json = JSON.parse(content);
+                updateGraph(json);
+            } catch (error) {
+                console.error('Error reading JSON:', error);
+                alert('Error reading JSON file.');
+            }
         };
 
         reader.readAsText(file);
