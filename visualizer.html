@@ -5,10 +5,9 @@
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style type="text/css">
         #visualization {
-            width: 800px;
-            height: 600px;
+            width: 100%;
+            height: 800px; /* Increased height for better spread */
             border: 1px solid lightgray;
-            margin-bottom: 10px;
         }
         #info {
             font-family: Arial, sans-serif;
@@ -42,20 +41,40 @@
                 }
             },
             edges: {
-                arrows: 'to',
-                color: {
-                    color: '#848484',
-                    highlight: '#ff0000',
-                    hover: '#ff0000'
+                smooth: { 
+                    type: 'dynamic' 
                 },
+                arrows: 'to',
                 font: {
                     size: 12,
                     align: 'top'
                 }
             },
+            physics: {
+                enabled: true,
+                solver: 'forceAtlas2Based',
+                forceAtlas2Based: {
+                    gravitationalConstant: -26,
+                    centralGravity: 0.005,
+                    springLength: 230,
+                    springConstant: 0.18
+                },
+                minVelocity: 0.75,
+                solver: 'barnesHut',
+                barnesHut: {
+                    gravitationalConstant: -8000,
+                    centralGravity: 0.3,
+                    springLength: 95
+                },
+            },
             interaction: { hover: true }
         };
         network = new vis.Network(container, data, options);
+
+        // Add a stabilization period to improve initial layout
+        network.on("stabilizationIterationsDone", function () {
+            network.setOptions({ physics: false });
+        });
 
         network.on("click", function (params) {
             var info = document.getElementById('info');
