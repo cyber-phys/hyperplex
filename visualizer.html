@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSON Graph Visualization</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style type="text/css">
+        #visualization {
+            width: 600px;
+            height: 400px;
+            border: 1px solid lightgray;
+        }
+    </style>
+</head>
+<body>
+<div id="visualization"></div>
+
+<input type="file" id="fileinput" />
+
+<script type="text/javascript">
+    var nodes = null;
+    var edges = null;
+    var network = null;
+
+    function draw() {
+        var container = document.getElementById("visualization");
+        var data = {
+            nodes: nodes,
+            edges: edges
+        };
+        var options = {};
+        network = new vis.Network(container, data, options);
+    }
+
+    function redraw() {
+        if (nodes) {
+            nodes.update(nodes.get());
+        }
+        if (edges) {
+            edges.update(edges.get());
+        }
+    }
+
+    function randomColor() {
+        var colors = ["red", "green", "blue", "purple", "orange", "yellow", "brown", "black", "white", "gray"];
+        return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    function updateGraph(json) {
+        var nodes_json = json["nodes"];
+        var edges_json = json["edges"];
+
+        nodes = new vis.DataSet(nodes_json);
+        edges = new vis.DataSet(edges_json);
+
+        nodes.on('*', function () {
+            console.log('nodes event', arguments);
+            redraw();
+        });
+
+        edges.on('*', function () {
+            console.log('edges event', arguments);
+            redraw();
+        });
+
+        draw();
+    }
+
+    function handleFileSelect(evt) {
+        var files = evt.target.files;
+        var file = files[0];
+
+        var reader = new FileReader();
+
+        reader.onload = function (e) {
+            var content = e.target.result;
+            var json = JSON.parse(content);
+            updateGraph(json);
+        };
+
+        reader.readAsText(file);
+    }
+
+    document.getElementById('fileinput').addEventListener('change', handleFileSelect, false);
+</script>
+</body>
+</html>
