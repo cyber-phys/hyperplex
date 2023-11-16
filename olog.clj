@@ -12,6 +12,10 @@
 (def openai-api-key (System/getenv "OPENAI_API_KEY"))
 (def replicate-api-key (System/getenv "REPLICATE_API_TOKEN"))
 
+(defn load-system-prompt [file-path]
+  (let [file-contents (slurp file-path)]
+    file-contents))
+
 ;; Function to post base64 image frame to OpenAI API and return the response body
 (defn oai-image-description [frame]
   (let [response (client/post "https://api.openai.com/v1/chat/completions"
@@ -23,6 +27,21 @@
                                                                                    :text "What’s in this image?"}
                                                                                   {:type "image_url"
                                                                                    :image_url {:url (str "data:image/jpeg;base64," frame)}}]}]
+                                                            :max_tokens 300})
+                               :throw false})]
+    (let [response-body (:body response)]
+      (println "Response body:" response-body)
+      response-body)))
+
+(defn oai-text-prompt [system-prompt user-input]
+  (let [response (client/post "https://api.openai.com/v1/chat/completions"
+                              {:headers {"Content-Type" "application/json"
+                                         "Authorization" (str "Bearer " openai-api-key)}
+                               :body (json/generate-string {:model "gpt-4-1106-preview"
+                                                            :messages [{:role "system"
+                                                                        :content system-prompt}
+                                                                       {:role "user"
+                                                                        :content user-input}]
                                                             :max_tokens 300})
                                :throw false})]
     (let [response-body (:body response)]
@@ -131,4 +150,4 @@
 ;;    (println "Saving updated hypergraph:" updated-hypergraph) ;; Debugging line
     (save-json-hypergraph updated-hypergraph hypergraph-path)))
 
-(fetch-url-contents (ocr-pdf-poll (ocr-pdf-post (str "https://arxiv.org/pdf/1912.02258.pdf"))))
+(oai-text-prompt (load-system-prompt "./olog-prompt.md") (fetch-url-contents (ocr-pdf-poll (ocr-pdf-post (str "https://arxiv.org/pdf/1912.02258.pdf")))))
