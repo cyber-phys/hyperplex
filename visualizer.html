@@ -73,19 +73,33 @@
 
     function updateGraph(json) {
         try {
-            var nodes_json = json["nodes"];
-            var edges_json = json["edges"];
-
-            nodes = new vis.DataSet(nodes_json);
-            edges = new vis.DataSet(edges_json.map(function(edge) {
-                return { ...edge, arrows: 'to' };
-            }));
+            var graphData = convertHypergraphToGraph(json);
+            nodes = new vis.DataSet(graphData.nodes);
+            edges = new vis.DataSet(graphData.edges);
 
             draw();
         } catch (error) {
-            console.error('Error parsing JSON:', error);
+            console.error('Error processing JSON:', error);
             alert('Invalid JSON file.');
         }
+    }
+
+    function convertHypergraphToGraph(json) {
+        var convertedNodes = json.nodes;
+        var convertedEdges = [];
+        json.hyperedges.forEach(function(edge) {
+            edge.sources.forEach(function(source) {
+                edge.targets.forEach(function(target) {
+                    convertedEdges.push({
+                        from: source,
+                        to: target,
+                        label: edge.label,
+                        arrows: 'to'
+                    });
+                });
+            });
+        });
+        return { nodes: convertedNodes, edges: convertedEdges };
     }
 
     function handleFileSelect(evt) {

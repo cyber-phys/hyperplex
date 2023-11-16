@@ -1,0 +1,37 @@
+{
+    "title": "Directed Hypergraph JSON Schema",
+    "type": "object",
+    "properties": {
+      "nodes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {"type": "string"},
+            "label": {"type": "string"}
+          },
+          "required": ["id", "label"]
+        }
+      },
+      "hyperedges": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {"type": "string"},
+            "label": {"type": "string"},
+            "sources": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "targets": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          },
+          "required": ["id", "label", "sources", "targets"]
+        }
+      }
+    },
+    "required": ["nodes", "hyperedges"]
+  }
