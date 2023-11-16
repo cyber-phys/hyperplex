@@ -30,12 +30,12 @@
       response-body)))
 
 ;; Function to post to nougat hosted on replicate
-(defn ocr-pdf-post []
+(defn ocr-pdf-post [pdf-url]
   (let [response (client/post "https://api.replicate.com/v1/deployments/chartierluc/nougat/predictions"
                               {:headers {"Content-Type" "application/json"
                                          "Authorization" (str "Token " replicate-api-key)}
                                :body (json/generate-string {"version" "fbf959aabb306f7cc83e31da4a5ee0ee78406d11216295dbd9ef75aba9b30538"
-                                                         "input" {"document" "https://replicate.delivery/pbxt/JbMUOcGjsnHOnQlLDA6dPwxH9StGCDhIS3AOEomBYdYvqDb9/sample2.pdf"
+                                                         "input" {"document" (str pdf-url)
                                                                   "postprocess" false
                                                                   "early_stopping" false}})
                                :throw false})]
@@ -48,7 +48,7 @@
   (let [response (client/get prediction-url {:headers {"Authorization" (str "Token " replicate-api-key)}})
         response-body (json/parse-string (:body response) true)] ;; Parse the response body
     ;; Print or process the response body as needed
-    (println "Response Body:" response-body)
+    ;;(println "Response Body:" response-body)
     response-body)) ;; Return the full response body or a reduced form
 
 (defn ocr-pdf-poll [prediction-url]
@@ -131,4 +131,4 @@
 ;;    (println "Saving updated hypergraph:" updated-hypergraph) ;; Debugging line
     (save-json-hypergraph updated-hypergraph hypergraph-path)))
 
-(fetch-url-contents (ocr-pdf-poll (ocr-pdf-post)))
+(fetch-url-contents (ocr-pdf-poll (ocr-pdf-post (str "https://arxiv.org/pdf/1912.02258.pdf"))))
