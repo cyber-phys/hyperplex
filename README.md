@@ -17,3 +17,12 @@ This script captures screenshots at regular 5-second intervals and integrates th
 ```
 bb auto-capture.clj
 ```
+
+# Roadmap
+Work is on going. The primarly challenge is representing the geometry of information in the ontology graph consistently.
+
+Feel free to make a PR if you have any ideas, eamil me at luc@sanative.ai if you wish to discuss further.
+
+- [x] Add screen grabs to hypergraph
+- [x] Add arXiv papers to the hypergraph
+- [ ] Consitant formating of the ologs. 
