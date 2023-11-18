@@ -33,6 +33,9 @@
       (println "Response body:" response-body)
       response-body)))
 
+(defn strip-chars [s]
+  (subs s 7 (- (count s) 3)))
+
 (defn oai-text-prompt [system-prompt user-input]
   (let [response (client/post "https://api.openai.com/v1/chat/completions"
                               {:headers {"Content-Type" "application/json"
@@ -42,11 +45,12 @@
                                                                         :content system-prompt}
                                                                        {:role "user"
                                                                         :content user-input}]
-                                                            :max_tokens 300})
+                                                            :max_tokens 4000})
                                :throw false})]
-    (let [response-body (:body response)]
-      (println "Response body:" response-body)
-      response-body)))
+    (let [response-body (json/parse-string (:body response) true)
+          content (:content (:message (nth (:choices response-body) 0)))]
+      (println "Response content:" content)
+      content)))
 
 ;; Function to post to nougat hosted on replicate
 (defn ocr-pdf-post [pdf-url]
@@ -86,8 +90,8 @@
 (defn fetch-url-contents [url]
   (let [response (client/get url)
         contents (:body response)]
-    (println "Fetched Content:" contents)
-    contents))
+    (println "Fetched Content:" (strip-chars contents))
+    (strip-chars contents)))
 
 ;; Define the destination folder on the desktop
 (def destination-folder (str (System/getProperty "user.home") "/Desktop/hypergraph/"))
