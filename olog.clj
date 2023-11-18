@@ -49,8 +49,8 @@
                                :throw false})]
     (let [response-body (json/parse-string (:body response) true)
           content (:content (:message (nth (:choices response-body) 0)))]
-      (println "Response content:" content)
-      content)))
+      (println "Response content:" (strip-chars content))
+      (strip-chars content))))
 
 ;; Function to post to nougat hosted on replicate
 (defn ocr-pdf-post [pdf-url]
@@ -154,4 +154,19 @@
 ;;    (println "Saving updated hypergraph:" updated-hypergraph) ;; Debugging line
     (save-json-hypergraph updated-hypergraph hypergraph-path)))
 
-(oai-text-prompt (load-system-prompt "./olog-prompt.md") (fetch-url-contents (ocr-pdf-poll (ocr-pdf-post (str "https://arxiv.org/pdf/1912.02258.pdf")))))
+;; (oai-text-prompt (load-system-prompt "./olog-prompt.md") (fetch-url-contents (ocr-pdf-poll (ocr-pdf-post (str "https://arxiv.org/pdf/1912.02258.pdf")))))
+
+;; At the beginning of your script, after the namespace declarations:
+(defn -main [& args]
+  (let [pdf-url (first args)]
+    (if pdf-url
+      (do
+        (println "Processing PDF URL:" pdf-url)
+        (oai-text-prompt (load-system-prompt "./olog-prompt.md") (fetch-url-contents (ocr-pdf-poll (ocr-pdf-post pdf-url))))
+        (println "Processing complete."))
+      (println "No PDF URL provided."))))
+
+;; At the end of your script, replace the direct call to ocr-pdf-post with:
+;; This will call the -main function with the command-line arguments.
+(when (not (:gen-class *ns*))
+  (apply -main *command-line-args*))
