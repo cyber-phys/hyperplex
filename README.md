@@ -19,7 +19,7 @@ bb auto-capture.clj
 ```
 
 # Roadmap
-Work is on going. The primarly challenge is representing the geometry of information in the ontology graph consistently.
+Work is on going. The primary challenge is representing the geometry of information in the ontology graph consistently.
 
 Feel free to make a PR if you have any ideas, email me at luc@sanative.ai if you wish to discuss further.
 
