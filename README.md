@@ -25,4 +25,4 @@ Feel free to make a PR if you have any ideas, eamil me at luc@sanative.ai if you
 
 - [x] Add screen grabs to hypergraph
 - [x] Add arXiv papers to the hypergraph
-- [ ] Consitant formating of the ologs. 
+- [ ] Consistent formating of the ologs. 
