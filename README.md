@@ -4,6 +4,14 @@ The project Hyperplex involves creating multimodal [machine-readable memeplexes]
 ## Crash Course on Ologs
 [Ontology logs (ologs)](https://math.mit.edu/~dspivak/informatics/olog.pdf) are conceptual frameworks for organizing and representing knowledge in a structured and categorical way. They leverage the principles of category theory to create a map of interconnected concepts and relationships. In an olog, entities and their interrelations are precisely defined, with emphasis on clear and functional connections. This structured approach enables the creation of a rigorous and reusable knowledge base. Ologs are particularly useful for representing complex domains of knowledge in a way that is both precise and adaptable, allowing for the integration of new information and the connection of disparate ideas. They can be especially beneficial in scientific and academic contexts where clear, systematic representation of complex information is crucial.
 
+[Ologs enable the construction of cross-domain analogies](https://arxiv.org/abs/1111.5297) that systematically map out nuanced relationships within a memeplex, allowing for machine-readable and multi-layered analysis of information.
+
+![](linguistic_structure_category_theory.png)
+*Ologs applied to generative linguistics*
+
+![](functorial_analogy.png)
+*Ologs used to form cross domain functorial analogies*
+
 # Usage
 Install [babaska](https://babashka.org)
 ## Set api keys
