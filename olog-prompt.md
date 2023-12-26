@@ -3,41 +3,39 @@ The user will provide you with the text from an academic paper from which you wi
 **JSON schema to use**:
 ```
 {
-  "title": "Directed Hypergraph JSON Schema",
-  "type": "object",
-  "properties": {
-    "nodes": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string"},
-          "label": {"type": "string"}
-        },
-        "required": ["id", "label"]
-      }
+  "title": "Linguistic Structure Hypergraph",
+  "nodes": [
+    {
+      "id": "n1",
+      "label": "word_theory"
     },
-    "hyperedges": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string"},
-          "label": {"type": "string"},
-          "sources": {
-            "type": "array",
-            "items": {"type": "string"}
-          },
-          "targets": {
-            "type": "array",
-            "items": {"type": "string"}
-          }
-        },
-        "required": ["id", "label", "sources", "targets"]
-      }
+    {
+      "id": "n2",
+      "label": "phoneme_r"
+    },
+    {
+      "id": "n3",
+      "label": "phoneme_o"
+    },
+    {
+      "id": "n4",
+      "label": "feature_voice"
     }
-  },
-  "required": ["nodes", "hyperedges"]
+  ],
+  "hyperedges": [
+    {
+      "id": "e1",
+      "label": "consists_of",
+      "sources": ["n1"],
+      "targets": ["n2", "n3"]
+    },
+    {
+      "id": "e2",
+      "label": "has_feature",
+      "sources": ["n2", "n3"],
+      "targets": ["n4"]
+    }
+  ]
 }
 ```
 
