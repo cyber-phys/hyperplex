@@ -142,31 +142,24 @@
         (println "Deleting temporary file:" temp-file)
         (shell "rm" "-f" temp-file)))))
 
-(defn update-hypergraph [base64-image]
-  (when (nil? base64-image)
-    (println "No image data to update.")) ;; Check for nil Base64 string
-  (let [hypergraph-path (str destination-folder "hypergraph.json")
-        hypergraph (if (.exists (io/file hypergraph-path))
-                     (json/parse-string (slurp hypergraph-path) true)
-                     {:nodes [] :hyperedges []})
-        node {:id (uuid-v4) :type "screenshot" :data base64-image :time (timestamp-iso-str) :description (oai-image-description base64-image)}
-        updated-hypergraph (update hypergraph :nodes conj node)]
-;;    (println "Saving updated hypergraph:" updated-hypergraph) ;; Debugging line
-    (save-json-hypergraph updated-hypergraph hypergraph-path)))
+;; Apend JSON to the existing JSON hypergraph
+(defn append-to-hypergraph [json-input file-path]
+  (let [new-data (json/parse-string json-input true)
+        existing-data (if (.exists (io/file file-path))
+                        (json/parse-string (slurp file-path) true)
+                        {"nodes" [], "hyperedges" []})
+        updated-data (merge-with into existing-data new-data)]
+    (with-open [writer (io/writer file-path)]
+      (.write writer (json/generate-string updated-data)))))
 
-;; (oai-text-prompt (load-system-prompt "./olog-prompt.md") (fetch-url-contents (ocr-pdf-poll (ocr-pdf-post (str "https://arxiv.org/pdf/1912.02258.pdf")))))
-
-;; At the beginning of your script, after the namespace declarations:
 (defn -main [& args]
   (let [pdf-url (first args)]
     (if pdf-url
       (do
         (println "Processing PDF URL:" pdf-url)
-        (oai-text-prompt (load-system-prompt "./olog-prompt.md") (fetch-url-contents (ocr-pdf-poll (ocr-pdf-post pdf-url))))
+        (append-to-hypergraph (oai-text-prompt (load-system-prompt "./olog-prompt.md") (fetch-url-contents (ocr-pdf-poll (ocr-pdf-post pdf-url)))) "arxiv_memeplex.json")
         (println "Processing complete."))
       (println "No PDF URL provided."))))
 
-;; At the end of your script, replace the direct call to ocr-pdf-post with:
-;; This will call the -main function with the command-line arguments.
 (when (not (:gen-class *ns*))
   (apply -main *command-line-args*))
