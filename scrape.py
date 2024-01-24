@@ -1,9 +1,57 @@
 import requests
 import lxml.html
+import sqlite3
+import uuid
 from markdownify import markdownify
 
 tld = "https://leginfo.legislature.ca.gov"
 url = "https://leginfo.legislature.ca.gov/faces/codes.xhtml"
+db_path = 'law_database.db'
+
+def create_law_entries_table(db_path):
+    # Connect to the SQLite3 database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # SQL statement to create the table
+    create_table_sql = """
+    CREATE TABLE IF NOT EXISTS law_entries (
+        uuid TEXT PRIMARY KEY,
+        code TEXT,
+        section REAL,
+        text TEXT,
+        amended TEXT,
+        url TEXT
+    );
+    """
+    
+    # Execute the SQL statement
+    cursor.execute(create_table_sql)
+    
+    # Commit the changes and close the connection
+    conn.commit()
+    conn.close()
+
+def insert_law_entry(db_path, code, section, text, amended, url):
+    # Connect to the SQLite3 database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Generate a unique UUID for the new entry
+    entry_uuid = str(uuid.uuid4())
+    
+    # SQL statement to insert a new row
+    insert_row_sql = """
+    INSERT INTO law_entries (uuid, code, section, text, amended, url)
+    VALUES (?, ?, ?, ?, ?, ?);
+    """
+    
+    # Execute the SQL statement
+    cursor.execute(insert_row_sql, (entry_uuid, code, section, text, amended, url))
+    
+    # Commit the changes and close the connection
+    conn.commit()
+    conn.close()
 
 def scrape_links(url):
     def process_links(xpath):
@@ -18,9 +66,26 @@ def scrape_links(url):
     response = requests.get(url)
     tree = lxml.html.fromstring(response.content)
 
+    def get_code_name(xpath):
+        # Find the <div> with the id 'manylawsections'
+        manylawsections_div = tree.xpath(xpath)[0]
+        b_tags_text = ""
+
+        # Iterate over all elements in the manylawsections <div>
+        for element in manylawsections_div.iterdescendants():
+            if element.tag == 'a':
+                # Stop if an <a> tag is found
+                break
+            if element.tag == 'b':
+                # Add the text content of <b> tag to the string
+                b_tags_text += "\n" + element.text_content().strip()
+
+        return b_tags_text.strip()
+        
     # Process many law sections
     for law_sections in tree.xpath('//*[@id="manylawsections"]/*/*/*/h6/a'):
-        text = law_sections.text_content().strip()
+        code_name = get_code_name('//*[@id="manylawsections"]')
+        section_number = law_sections.text_content().strip()
         prev_div = law_sections.getparent().getparent()
         # Select all <p> tags within prev_div
         p_tags = prev_div.xpath('.//p')
@@ -42,21 +107,14 @@ def scrape_links(url):
         # Join all the HTML strings from the <p> tags
         prev_div_html = ''.join(p_html_list) if p_tags else "No <p> tags found"
         markdown_content = markdownify(prev_div_html)
-        print(markdown_content)
-        prev_div_text = prev_div.text_content().strip() if prev_div else "No preceding div"
-        # print(f"Section Text: {text}, Previous Div Text: {prev_div_text}")
+        # print(markdown_content)
+        insert_law_entry(db_path, code_name, section_number, markdown_content, i_content, url)
+        print(f"Code: {code_name}, Section: {section_number}")
     
     # Process each group of links with the same structure
     process_links('//*[@id="codestocheader"]//a')
     process_links('//*[@id="codestreeForm2"]//a')
     process_links('//*[@id="expandedbranchcodesid"]//a')
-    # process_links('//*[@id="manylawsections"]//a')
-    
 
-
-    #  # Process singal law sections
-    # for law_sections in tree.xpath('//*[@id="single_law_section"]'):
-    #     text = law_sections.text_content().strip()
-        # print(text)
-
+create_law_entries_table(db_path)
 scrape_links(url)
