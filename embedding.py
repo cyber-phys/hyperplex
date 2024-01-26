@@ -4,8 +4,10 @@ from typing import Callable
 from uuid import uuid4
 import concurrent.futures
 from sentence_transformers import SentenceTransformer
-import itertools
 import functools
+from nltk.tokenize import sent_tokenize
+import nltk
+nltk.download('punkt')
 
 def setup_database(db_path: str) -> None:
     """
@@ -45,9 +47,11 @@ def setup_database(db_path: str) -> None:
     conn.commit()
     conn.close()
 
-def fetch_law_entries(conn, batch_size=1000):
+
+def fetch_law_entries(conn, chunking_method, chunking_size, batch_size=1000):
     """
-    Generator function to yield batches of law entries from the database.
+    Generator function to yield batches of law entries from the database, chunked according to the specified method and size,
+    along with the character start and end positions of each chunk.
     """
     cursor = conn.cursor()
     cursor.execute("SELECT uuid, text FROM law_entries")
@@ -55,7 +59,31 @@ def fetch_law_entries(conn, batch_size=1000):
         entries = cursor.fetchmany(batch_size)
         if not entries:
             break
-        yield entries
+        chunked_entries = []
+        for entry in entries:
+            law_entry_uuid, text = entry
+            char_start = 0
+            if chunking_method == 'sentence':
+                sentences = sent_tokenize(text)
+                for i in range(0, len(sentences), chunking_size):
+                    chunk = ' '.join(sentences[i:i+chunking_size])
+                    char_end = char_start + len(chunk)
+                    chunked_entries.append((law_entry_uuid, chunk, char_start, char_end))
+                    char_start = char_end + 1  # +1 for the space after each chunk
+            elif chunking_method == 'word':
+                words = text.split()
+                for i in range(0, len(words), chunking_size):
+                    chunk = ' '.join(words[i:i+chunking_size])
+                    char_end = char_start + len(chunk)
+                    chunked_entries.append((law_entry_uuid, chunk, char_start, char_end))
+                    char_start = char_end + 1  # +1 for the space after each chunk
+            elif chunking_method == 'char':
+                for i in range(0, len(text), chunking_size):
+                    chunk = text[i:i+chunking_size]
+                    char_end = char_start + len(chunk)
+                    chunked_entries.append((law_entry_uuid, chunk, char_start, char_end))
+                    char_start = char_end
+        yield chunked_entries
 
 def compute_embeddings(model_name, texts):
     """
@@ -65,30 +93,32 @@ def compute_embeddings(model_name, texts):
     embeddings = model.encode(texts, convert_to_tensor=False)
     return embeddings
 
-def store_embeddings(conn, model_uuid, entries, embeddings):
+def store_embeddings(conn, model_uuid, entries_with_positions):
     """
-    Function to store embeddings in the database.
+    Function to store embeddings in the database along with their character start and end positions.
     """
     cursor = conn.cursor()
-    for entry, embedding in zip(entries, embeddings):
-        law_entry_uuid, _ = entry
+    for law_entry_uuid, char_start, char_end, embedding in entries_with_positions:
         cursor.execute("""
-            INSERT INTO embeddings (model_uuid, law_entry_uuid, creation_time, embedding)
-            VALUES (?, ?, datetime('now'), ?)
-        """, (model_uuid, law_entry_uuid, embedding.tobytes()))
+            INSERT INTO embeddings (model_uuid, law_entry_uuid, creation_time, char_start, char_end, embedding)
+            VALUES (?, ?, datetime('now'), ?, ?, ?)
+        """, (model_uuid, law_entry_uuid, char_start, char_end, embedding.tobytes()))
 
 def process_batch(model_name, model_uuid, batch, db_path):
     """
     Function to process a batch of entries, compute embeddings, and store them in the database.
     """
-    _, texts = zip(*batch)
+    # Unpack the batch to separate the texts and their corresponding char positions
+    law_entry_uuids, texts, char_starts, char_ends = zip(*batch)
     embeddings = compute_embeddings(model_name, texts)
     conn = sqlite3.connect(db_path)
-    store_embeddings(conn, model_uuid, batch, embeddings)
+    # Combine the entries and their char positions with the computed embeddings
+    entries_with_positions = zip(law_entry_uuids, char_starts, char_ends, embeddings)
+    store_embeddings(conn, model_uuid, entries_with_positions)
     conn.commit()
     conn.close()
 
-def create_embedding(db_path, label, model_name, chunking_method, chunking_size):
+def create_embedding(db_path, label, model_name, chunking_method, chunking_size, verbose=False):
     """
     Creates new embeddings with the specified model, chunking method, and chunking size.
     """
@@ -112,7 +142,7 @@ def create_embedding(db_path, label, model_name, chunking_method, chunking_size)
     conn.commit()
 
     # Fetch and process entries in batches
-    batches = fetch_law_entries(conn)
+    batches = fetch_law_entries(conn, chunking_method, chunking_size)
     with concurrent.futures.ThreadPoolExecutor() as executor:
         # Use functools.partial to create a new function with some parameters of process_batch pre-filled
         func = functools.partial(process_batch, model_name, model_uuid, db_path=db_path)
@@ -140,6 +170,7 @@ def create_parser() -> Callable:
     create_parser = subparsers.add_parser('create', help='Create a new model entry and process a label.')
     create_parser.add_argument('model_name', type=str, help='The name of the model to use')
     create_parser.add_argument('label', type=str, help='The label to process')
+    create_parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging')
     create_parser.add_argument('--chunk_method', type=str, choices=['sentence', 'word', 'char'], 
                                default='sentence', help='The chunking method (default: sentence)')
     create_parser.add_argument('--chunk_size', type=int, default=1, 
@@ -162,7 +193,7 @@ if __name__ == "__main__":
         # Validate chunking size if provided
         if args.chunk_size is not None and args.chunk_size <= 0:
             parser.error("Chunking size must be a non-zero integer")
-        create_embedding(db_name, args.label, args.model_name, args.chunk_method, args.chunk_size)
+        create_embedding(db_name, args.label, args.model_name, args.chunk_method, args.chunk_size, args.verbose)
     elif args.command == 'search':
         # Here you would add the logic to handle the 'search' command
         print("TODO: Implement search logic")
