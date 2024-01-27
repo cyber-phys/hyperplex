@@ -3,10 +3,12 @@ import argparse
 from typing import Callable
 from uuid import uuid4
 import concurrent.futures
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, util
 import functools
 from nltk.tokenize import sent_tokenize
 import nltk
+import torch
+import numpy
 nltk.download('punkt')
 
 def setup_database(db_path: str) -> None:
@@ -46,7 +48,6 @@ def setup_database(db_path: str) -> None:
 
     conn.commit()
     conn.close()
-
 
 def fetch_law_entries(conn, chunking_method, chunking_size, batch_size=1000):
     """
@@ -151,7 +152,73 @@ def create_embedding(db_path, label, model_name, chunking_method, chunking_size,
     conn.close()
     print(f"Model '{model_name}' with label '{label}', using chunking method '{chunking_method}' and size '{chunking_size}', added to the database.")
 
-# The rest of the file remains unchanged
+def compute_query_embedding(model_name: str, query: str) -> torch.Tensor:
+    """
+    Compute the embedding for a query using the specified model.
+    """
+    model = SentenceTransformer(model_name)
+    query_embedding = model.encode(query, convert_to_tensor=True)
+    return query_embedding
+
+def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5):
+    """
+    Search the embeddings table for the top-k most similar entries to the query embedding.
+    """
+    cursor = conn.cursor()
+    cursor.execute("SELECT law_entry_uuid, embedding FROM embeddings")
+    corpus_embeddings = []
+    law_entry_uuids = []
+    for law_entry_uuid, embedding_blob in cursor.fetchall():
+        embedding = torch.Tensor(numpy.frombuffer(embedding_blob, dtype=numpy.float32))
+        corpus_embeddings.append(embedding)
+        law_entry_uuids.append(law_entry_uuid)
+
+    corpus_embeddings_tensor = torch.stack(corpus_embeddings)
+    cos_scores = util.cos_sim(query_embedding, corpus_embeddings_tensor)[0]
+    top_results = torch.topk(cos_scores, k=top_k)
+
+    similar_entries = []
+    for score, idx in zip(top_results[0], top_results[1]):
+        similar_entries.append((law_entry_uuids[idx], score.item()))
+
+    return similar_entries
+
+def print_similar_entries(db_path: str, similar_entries):
+    """
+    Print out the text of the law entries for the top-k results and close the database connection.
+
+    Args:
+        conn: The database connection object.
+        similar_entries: A list of tuples containing the law entry UUIDs and their corresponding similarity scores.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        for law_entry_uuid, score in similar_entries:
+            cursor.execute("SELECT text FROM law_entries WHERE uuid = ?", (law_entry_uuid,))
+            text = cursor.fetchone()[0]
+            print(f"{text} (Score: {score:.4f})")
+    finally:
+        conn.close()
+
+def perform_search(db_path: str, model_name: str, query: str, top_k: int = 5) -> list:
+    """
+    Perform a search over the embeddings table using cosine similarity and return the similar entries.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        model_name (str): The name of the model to use for computing the query embedding.
+        query (str): The query string to search for.
+        top_k (int): The number of top similar entries to return.
+
+    Returns:
+        list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores.
+    """
+    conn = sqlite3.connect(db_path)
+    query_embedding = compute_query_embedding(model_name, query)
+    similar_entries = search_embeddings(conn, query_embedding, top_k)
+    conn.close()
+    return similar_entries
 
 def create_parser() -> Callable:
     """
@@ -195,5 +262,5 @@ if __name__ == "__main__":
             parser.error("Chunking size must be a non-zero integer")
         create_embedding(db_name, args.label, args.model_name, args.chunk_method, args.chunk_size, args.verbose)
     elif args.command == 'search':
-        # Here you would add the logic to handle the 'search' command
-        print("TODO: Implement search logic")
+        similar_entries = perform_search(db_name, args.model_name, args.query)
+        print_similar_entries(db_name, similar_entries)
