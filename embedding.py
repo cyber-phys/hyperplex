@@ -46,6 +46,32 @@ def setup_database(db_path: str) -> None:
         );
     """)
 
+    # SQL statement to create the labels table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS labels (
+            label_uuid TEXT PRIMARY KEY,
+            label TEXT NOT NULL UNIQUE,
+            creation_time TEXT NOT NULL,
+            color TEXT
+        );
+    """)
+
+    # SQL statement to create the label_embeddings table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS label_embeddings (
+            label_uuid TEXT NOT NULL,
+            law_entry_uuid TEXT NOT NULL,
+            creation_time TEXT NOT NULL,
+            char_start INTEGER NOT NULL,
+            char_end INTEGER NOT NULL,
+            embedding BLOB NOT NULL,
+            model_uuid TEXT NOT NULL,
+            FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
+            FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid),
+            FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid)
+        );
+    """)
+
     conn.commit()
     conn.close()
 
@@ -252,6 +278,10 @@ def create_parser() -> Callable:
     search_parser.add_argument('model_name', type=str, help='The name of the model to use for searching')
     search_parser.add_argument('query', type=str, help='The query to search for')
 
+    # Create subparser for the 'init-db' or 'init-db' command
+    init_db_parser = subparsers.add_parser('init-db', help='Initialize the database and create necessary tables.')
+    init_db_parser.add_argument('db_name', type=str, help='The name of the database to initialize')
+
     return parser
 
 if __name__ == "__main__":
@@ -265,6 +295,11 @@ if __name__ == "__main__":
         if args.chunk_size is not None and args.chunk_size <= 0:
             parser.error("Chunking size must be a non-zero integer")
         create_embedding(db_name, args.label, args.model_name, args.chunk_method, args.chunk_size, args.verbose)
+
     elif args.command == 'search':
         similar_entries = perform_search(db_name, args.model_name, args.query)
         print_similar_entries(db_name, similar_entries)
+    
+    elif args.command == 'init-db':
+        setup_database(args.db_name)
+        print(f"Database '{args.db_name}' initialized successfully.")
