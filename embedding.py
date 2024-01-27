@@ -75,6 +75,43 @@ def setup_database(db_path: str) -> None:
     conn.commit()
     conn.close()
 
+def insert_label(db_path, label_text, color='blue'):
+    """
+    Insert a new label into the labels table.
+
+    Args:
+        conn: The database connection object.
+        label_text (str): The text of the label to insert.
+        color (str, optional): The color associated with the label.
+
+    Returns:
+        str: The UUID of the inserted label.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    label_uuid = str(uuid4())
+    cursor.execute("""
+        INSERT INTO labels (label_uuid, label, creation_time, color)
+        VALUES (?, ?, datetime('now'), ?)
+    """, (label_uuid, label_text, color))
+    conn.commit()
+    return label_uuid
+
+def list_labels(db_path):
+    """
+    List all labels in the labels table.
+
+    Args:
+        conn: The database connection object.
+
+    Returns:
+        list: A list of tuples containing label details.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT label_uuid, label, creation_time, color FROM labels")
+    return cursor.fetchall()
+
 def fetch_law_entries(conn, chunking_method, chunking_size, batch_size=1000):
     """
     Generator function to yield batches of law entries from the database, chunked according to the specified method and size,
@@ -282,6 +319,14 @@ def create_parser() -> Callable:
     init_db_parser = subparsers.add_parser('init-db', help='Initialize the database and create necessary tables.')
     init_db_parser.add_argument('db_name', type=str, help='The name of the database to initialize')
 
+    # Create subparser for the 'create-label' command
+    create_label_parser = subparsers.add_parser('create-label', help='Insert a new label into the labels table.')
+    create_label_parser.add_argument('label_text', type=str, help='The text of the label to insert')
+    create_label_parser.add_argument('--color', type=str, default='blue', help='The color associated with the label (default: blue)')
+
+    # Create subparser for the 'list-labels' command
+    list_labels_parser = subparsers.add_parser('list-labels', help='List all labels in the labels table.')
+
     return parser
 
 if __name__ == "__main__":
@@ -303,3 +348,12 @@ if __name__ == "__main__":
     elif args.command == 'init-db':
         setup_database(args.db_name)
         print(f"Database '{args.db_name}' initialized successfully.")
+    
+    elif args.command == 'create-label':
+        label_uuid = insert_label(db_name, args.label_text, args.color)
+        print(f"Label '{args.label_text}' with UUID '{label_uuid}' inserted successfully.")
+
+    elif args.command == 'list-labels':
+        labels = list_labels(db_name)
+        for label in labels:
+            print(f"UUID: {label[0]}, Label: {label[1]}, Creation Time: {label[2]}, Color: {label[3]}")
