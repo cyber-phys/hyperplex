@@ -165,13 +165,17 @@ def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5):
     Search the embeddings table for the top-k most similar entries to the query embedding.
     """
     cursor = conn.cursor()
-    cursor.execute("SELECT law_entry_uuid, embedding FROM embeddings")
+    cursor.execute("SELECT law_entry_uuid, embedding, char_start, char_end FROM embeddings")
     corpus_embeddings = []
     law_entry_uuids = []
-    for law_entry_uuid, embedding_blob in cursor.fetchall():
+    char_starts = []
+    char_ends = []
+    for law_entry_uuid, embedding_blob, char_start, char_end in cursor.fetchall():
         embedding = torch.Tensor(numpy.frombuffer(embedding_blob, dtype=numpy.float32))
         corpus_embeddings.append(embedding)
         law_entry_uuids.append(law_entry_uuid)
+        char_starts.append(char_start)
+        char_ends.append(char_end)
 
     corpus_embeddings_tensor = torch.stack(corpus_embeddings)
     cos_scores = util.cos_sim(query_embedding, corpus_embeddings_tensor)[0]
@@ -179,7 +183,7 @@ def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5):
 
     similar_entries = []
     for score, idx in zip(top_results[0], top_results[1]):
-        similar_entries.append((law_entry_uuids[idx], score.item()))
+        similar_entries.append((law_entry_uuids[idx], score.item(), char_starts[idx], char_ends[idx]))
 
     return similar_entries
 
@@ -194,10 +198,10 @@ def print_similar_entries(db_path: str, similar_entries):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     try:
-        for law_entry_uuid, score in similar_entries:
+        for law_entry_uuid, score, char_start, char_end in similar_entries:
             cursor.execute("SELECT text FROM law_entries WHERE uuid = ?", (law_entry_uuid,))
             text = cursor.fetchone()[0]
-            print(f"{text} (Score: {score:.4f})")
+            print(f"{text} (Score: {score:.4f}, Start: {char_start}, End: {char_end})")
     finally:
         conn.close()
 
