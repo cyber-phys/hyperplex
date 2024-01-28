@@ -76,6 +76,34 @@ def setup_database(db_path: str) -> None:
     conn.commit()
     conn.close()
 
+def fetch_law_entries(db_path):
+    """
+    Fetch all entries from the law_entries table in the database.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+
+    Returns:
+        list: A list of tuples containing the law entries.
+    """
+    # Connect to the SQLite3 database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # SQL statement to select all rows
+    select_all_sql = "SELECT * FROM law_entries;"
+    
+    # Execute the SQL statement
+    cursor.execute(select_all_sql)
+    
+    # Fetch all rows
+    entries = cursor.fetchall()
+    
+    # Close the connection
+    conn.close()
+    
+    return entries
+
 def cluster_entries(db_path: str, model_name: str, min_community_size: int = 25, threshold: float = 0.75):
     """
     Cluster law entries based on their embeddings and print out the clusters.
