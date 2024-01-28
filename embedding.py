@@ -9,6 +9,7 @@ from nltk.tokenize import sent_tokenize
 import nltk
 import torch
 import numpy
+import time
 nltk.download('punkt')
 
 def setup_database(db_path: str) -> None:
@@ -74,6 +75,53 @@ def setup_database(db_path: str) -> None:
 
     conn.commit()
     conn.close()
+
+def cluster_entries(db_path: str, model_name: str, min_community_size: int = 25, threshold: float = 0.75):
+    """
+    Cluster law entries based on their embeddings and print out the clusters.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        model_name (str): The name of the model to use for computing embeddings.
+        min_community_size (int): Minimum number of entries to form a cluster.
+        threshold (float): Cosine similarity threshold for considering entries as similar.
+    """
+    # Connect to the database and retrieve embeddings
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT law_entry_uuid, embedding FROM embeddings")
+    entries = cursor.fetchall()
+    cursor.execute("SELECT model FROM nlp_model WHERE label = ?", (model_name,))
+    model_name_row = cursor.fetchone()
+    conn.close()
+
+    model_name = model_name_row[0]
+    model = SentenceTransformer(model_name)
+
+    if not model_name_row:
+        print(f"No model found with label '{model_name}'.")
+        return
+        
+    # Extract embeddings and convert them to tensors
+    law_entry_uuids = [entry[0] for entry in entries]
+    embeddings = [torch.Tensor(numpy.frombuffer(entry[1], dtype=numpy.float32)) for entry in entries]
+    embeddings_tensor = torch.stack(embeddings)
+
+    print("Start clustering")
+    start_time = time.time()
+
+    # Perform clustering
+    clusters = util.community_detection(embeddings_tensor, min_community_size=min_community_size, threshold=threshold)
+
+    print("Clustering done after {:.2f} sec".format(time.time() - start_time))
+
+    # Print out the clusters
+    for i, cluster in enumerate(clusters):
+        print("\nCluster {}, #{} Elements ".format(i + 1, len(cluster)))
+        for entry_id in cluster:
+            print("\tUUID: ", law_entry_uuids[entry_id])
+    
+    return
 
 def insert_label(db_path, label_text, color='blue'):
     """
@@ -287,6 +335,20 @@ def perform_search(db_path: str, model_name: str, query: str, top_k: int = 5) ->
     conn.close()
     return similar_entries
 
+def list_models(db_path):
+    """
+    List all models and their labels from the nlp_model table.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT model, label FROM nlp_model")
+    models = cursor.fetchall()
+    conn.close()
+    return models
+
 def create_parser() -> Callable:
     """
     Create and return a command line argument parser with two subparsers for 'create' and 'search' commands.
@@ -327,6 +389,15 @@ def create_parser() -> Callable:
     # Create subparser for the 'list-labels' command
     list_labels_parser = subparsers.add_parser('list-labels', help='List all labels in the labels table.')
 
+    # Create subparser for the 'cluster' command
+    cluster_parser = subparsers.add_parser('cluster', help='Cluster law entries based on their embeddings.')
+    cluster_parser.add_argument('model_name', type=str, help='The name of the model to use for clustering')
+    cluster_parser.add_argument('--min_community_size', type=int, default=25, help='Minimum number of entries to form a cluster (default: 25)')
+    cluster_parser.add_argument('--threshold', type=float, default=0.75, help='Cosine similarity threshold for considering entries as similar (default: 0.75)')
+
+    # Create subparser for the 'list-models' command
+    list_models_parser = subparsers.add_parser('list-models', help='List all models and their labels from the nlp_model table.')
+
     return parser
 
 if __name__ == "__main__":
@@ -357,3 +428,11 @@ if __name__ == "__main__":
         labels = list_labels(db_name)
         for label in labels:
             print(f"UUID: {label[0]}, Label: {label[1]}, Creation Time: {label[2]}, Color: {label[3]}")
+
+    elif args.command == 'cluster':
+            cluster_entries(db_name, args.model_name, args.min_community_size, args.threshold)
+
+    elif args.command == 'list-models':
+        models = list_models(db_name)
+        for model, label in models:
+            print(f"Model: {model}, Label: {label}")
