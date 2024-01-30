@@ -1,7 +1,9 @@
 import json
 import sqlite3
 from sqlite3 import Error
-from functools import partial
+from functools import partial, reduce
+import uuid
+from typing import Dict, List, Tuple
 
 def connect_db(db_file):
     """Attempt to connect to the SQLite database and return the connection object."""
@@ -105,11 +107,44 @@ def create_database(db_file):
         conn.close()
         print("Database and tables created successfully.")
 
+def generate_uuid() -> str:
+    """
+    Generate a unique UUID string.
+    """
+    return str(uuid.uuid4())
+
+def update_chat_ids_with_uuids(conversation: Dict, uuid_map: Dict[str, str]) -> Dict:
+    """
+    Update chat IDs and parent references in a conversation with new UUIDs.
+    """
+    def update_chat(chat):
+        new_chat = chat.copy()
+        new_chat["id"] = uuid_map.get(chat["id"], chat["id"])
+        if chat["parent"] in uuid_map:
+            new_chat["parent"] = uuid_map[chat["parent"]]
+        return new_chat
+
+    updated_chats = list(map(update_chat, conversation["mapping"].values()))
+    conversation["mapping"] = {chat["id"]: chat for chat in updated_chats}
+    return conversation
+
 def parse_json(file_path):
     with open(file_path, 'r') as f:
         data = json.load(f)
 
-    def process_chat(chat_data, conversation_id, first_entry_id):
+    def generate_new_uuid_map(chats):
+        """Generate a mapping of old IDs to new UUIDs."""
+        return {chat["id"]: str(uuid.uuid4()) for chat in chats}
+
+    def apply_new_uuids(chat, uuid_map):
+        """Apply new UUIDs to chat and adjust parent references."""
+        updated_chat = chat.copy()
+        updated_chat["id"] = uuid_map.get(chat["id"], chat["id"])
+        if chat["parent"] in uuid_map:
+            updated_chat["parent"] = uuid_map[chat["parent"]]
+        return updated_chat
+
+    def process_chat(chat_data, conversation_id, first_entry_id, uuid_map):
         is_first_message = (chat_data["id"] == first_entry_id)
         message_text = []
         model = "unknown"
@@ -135,28 +170,31 @@ def parse_json(file_path):
         else:
             print(chat_data)
 
-
-        if message_text:
-            return {
+        if chat_data["message"] is not None:
+            return apply_new_uuids({
                 "id": chat_data["id"],
                 "content_type": content_type,
                 "model": model,
-                "message": message_text,
+                "message": message_text if message_text else "",
                 "author": role,
-                "create_time": chat_data["message"]["create_time"] if chat_data["message"] else None,
-                "status": chat_data["message"]["status"] if chat_data["message"] else "unknown",
-                "recipient": chat_data["message"]["recipient"] if chat_data["message"] else "unknown",
+                "create_time": chat_data.get("message", {}).get("create_time"),
+                "status": chat_data.get("message", {}).get("status", "unknown"),
+                "recipient": chat_data.get("message", {}).get("recipient", "unknown"),
                 "parent": chat_data["parent"],
                 "children": chat_data["children"],
                 "conversation_id": conversation_id,
                 "is_first_message": is_first_message
-            }
-        return None
+            }, uuid_map)
+        else: 
+            return None
 
     conversation_infos = []
     all_chats = []
 
     for conversation in data:
+        conversation_chats = list(conversation["mapping"].values())
+        uuid_map = generate_new_uuid_map(conversation_chats)
+
         conversation_info = {
             "id": conversation["id"],
             "title": conversation.get("title", ""),
@@ -175,7 +213,7 @@ def parse_json(file_path):
 
         # Iterate over the dictionary's values
         for chat_id, chat_data in conversation["mapping"].items():
-            chat = process_chat(chat_data, conversation["id"], first_entry_id)
+            chat = process_chat(chat_data, conversation["id"], first_entry_id, uuid_map)
             if chat:
                 all_chats.append(chat)
 
@@ -202,8 +240,10 @@ def insert_conversations_and_chats(db_file, conversation_infos, all_chats):
         conn.close()
         print("Conversations and chats inserted successfully.")
 
-# Example usage
+# Parse JSON and create the database
 db_file = 'chat.db'
 create_database(db_file)
 conversation_infos, all_chats = parse_json('/Users/luc/law/chatgpt_export_12_29_24/conversations.json')
+
+# Insert conversations and chats with updated UUIDs
 insert_conversations_and_chats(db_file, conversation_infos, all_chats)
