@@ -67,7 +67,8 @@ def create_database(db_file):
             CREATE TABLE IF NOT EXISTS topics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT,
-                description TEXT
+                description TEXT,
+                gnn_label TEXT
             );
         ''')
 
@@ -101,6 +102,17 @@ def create_database(db_file):
                 topic_id INTEGER,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id),
                 FOREIGN KEY (topic_id) REFERENCES topics(id)
+            );
+        ''')
+
+        # Topics hierarchy table
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS topic_hierarchy (
+                parent_topic_id INTEGER,
+                child_topic_id INTEGER,
+                FOREIGN KEY (parent_topic_id) REFERENCES topics(id),
+                FOREIGN KEY (child_topic_id) REFERENCES topics(id),
+                PRIMARY KEY (parent_topic_id, child_topic_id)
             );
         ''', commit=True)
 
