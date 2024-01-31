@@ -2,10 +2,53 @@ from sanic import Sanic, response
 from sanic_ext import Extend
 from embedding import perform_search, list_labels
 import sqlite3
+from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations
 
 app = Sanic("LexAid")
 app.config.CORS_ORIGINS = "http://localhost:3000"
 extend = Extend(app)
+
+chat_db_path = 'chat_jn.db'
+law_db_path = 'law_database_old.db'
+
+@app.route('/api/chats', methods=['GET'])
+async def get_chats(request):
+    conn = connect_db(chat_db_path)
+    chats = fetch_chats(conn)
+    conn.close()
+    return response.json(chats)
+
+@app.route('/api/topics', methods=['GET'])
+async def get_topics(request):
+    conn = connect_db(chat_db_path)
+    topics = fetch_topics(conn)
+    conn.close()
+    return response.json(topics)
+
+@app.route('/api/chat_topics', methods=['GET'])
+async def get_chat_topics(request):
+    conn = connect_db(chat_db_path)
+    chat_topics = fetch_chat_topics(conn)
+    conn.close()
+    return response.json(chat_topics)
+
+@app.route('/api/chat_links', methods=['GET'])
+async def get_chat_links(request):
+    conn = connect_db(chat_db_path)
+    chat_links = fetch_chat_links(conn)
+    conn.close()
+    return response.json(chat_links)
+
+@app.get("/conversations")
+async def conversations_handler(request):
+    """
+    Retrieve a list of conversations from the database and return them as JSON,
+    using the fetch_table_data function for consistency with other endpoints.
+    """
+    conn = connect_db(chat_db_path)
+    conversations = fetch_conversations(conn)
+    conn.close()
+    return response.json(conversations)
 
 @app.get("/labels")
 async def labels_handler(request):
@@ -39,7 +82,7 @@ async def labels_handler(request):
                     type: string
                     description: The color associated with the label.
     """
-    labels = list_labels('law_database_old.db')
+    labels = list_labels(law_db_path)
     return response.json([{
         'label_uuid': label[0],
         'label': label[1],
@@ -122,12 +165,10 @@ async def search_handler(request):
     label = body.get("label", None) 
 
     print(label)
-
-    # Assuming 'db_path' is a global variable or retrieved from configuration
-    db_path = 'law_database_old.db'
-    similar_entries = perform_search(db_path, model_name, query, top_k, label)
+    
+    similar_entries = perform_search(law_db_path, model_name, query, top_k, label)
     # Fetch the text for each similar entry
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(law_db_path)
     cursor = conn.cursor()
     detailed_entries = []
     for law_entry_uuid, score, char_start, char_end in similar_entries:

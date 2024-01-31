@@ -230,6 +230,36 @@ def insert_conversations_and_chats(db_file, conversation_infos, all_chats):
         conn.close()
         print("Conversations and chats inserted successfully.")
 
+def fetch_table_data(conn, query):
+    """Fetch data from a table using a provided SQL query."""
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    except Error as e:
+        print(f"Error fetching data: {e}")
+        return []
+
+def fetch_chats(conn):
+    return fetch_table_data(conn, "SELECT * FROM chats")
+
+def fetch_topics(conn):
+    return fetch_table_data(conn, "SELECT * FROM topics")
+
+def fetch_chat_topics(conn):
+    return fetch_table_data(conn, "SELECT * FROM chat_topics")
+
+def fetch_chat_links(conn):
+    return fetch_table_data(conn, "SELECT * FROM chat_links")
+
+def fetch_conversations(conn):
+    """
+    Fetch conversations from the database using the fetch_table_data function.
+    """
+    query = "SELECT id, title, create_time, update_time, is_archived FROM conversations"
+    return fetch_table_data(conn, query)
+
 def fetch_chat(conn, chat_id) -> Dict:
     """
     Fetch chat data by chat ID from the database and return it as a dictionary.
