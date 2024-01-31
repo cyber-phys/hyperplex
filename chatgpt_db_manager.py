@@ -242,7 +242,31 @@ def fetch_table_data(conn, query):
         return []
 
 def fetch_chats(conn):
-    return fetch_table_data(conn, "SELECT * FROM chats")
+    """
+    Fetch chats from the database, including the topic label name for each chat.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of dictionaries, each representing a chat with an additional 'label' field for the topic label name.
+    """
+    try:
+        cursor = conn.cursor()
+        # Modified SQL query to join chats with chat_topics and topics to fetch the topic name as label
+        query = """
+        SELECT c.id, c.conversation_id, c.content_type, c.model, c.message, c.author, c.create_time, c.status, c.recipient, c.parent, c.is_first_message, t.name AS label
+        FROM chats c
+        LEFT JOIN chat_topics ct ON c.id = ct.chat_id
+        LEFT JOIN topics t ON ct.topic_id = t.id
+        """
+        cursor.execute(query)
+        columns = [description[0] for description in cursor.description]
+        # Using list comprehension and dict to ensure the function is deterministic and has no side effects
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    except Error as e:
+        print(f"Error fetching chats with topics: {e}")
+        return []
 
 def fetch_topics(conn):
     return fetch_table_data(conn, "SELECT * FROM topics")
@@ -251,7 +275,43 @@ def fetch_chat_topics(conn):
     return fetch_table_data(conn, "SELECT * FROM chat_topics")
 
 def fetch_chat_links(conn):
-    return fetch_table_data(conn, "SELECT * FROM chat_links")
+    """
+    Fetch chat links from the database, including the topic label name for each chat link.
+    Each chat link will also have a UUIDv4 generated as its id.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of dictionaries, each representing a chat link with an additional 'label' field for the topic label name and a UUIDv4 as 'id'.
+    """
+    try:
+        cursor = conn.cursor()
+        # Modified SQL query to join chat_links with topics to fetch the topic name as label
+        query = """
+        SELECT cl.source_chat_id, cl.target_chat_id, cl.topic_id, t.name AS label
+        FROM chat_links cl
+        JOIN topics t ON cl.topic_id = t.id
+        """
+        cursor.execute(query)
+        chat_links = cursor.fetchall()
+        
+        # Generate a UUIDv4 for each chat link and construct the result
+        result = [
+            {
+                "id": str(uuid.uuid4()),
+                "source_chat_id": chat_link[0],
+                "target_chat_id": chat_link[1],
+                "topic_id": chat_link[2],
+                "label": chat_link[3]
+            }
+            for chat_link in chat_links
+        ]
+        
+        return result
+    except Error as e:
+        print(f"Error fetching chat links with topics: {e}")
+        return []
 
 def fetch_conversations(conn):
     """
@@ -622,10 +682,10 @@ def insert_topic_hierarchy(conn, parent_topic_names: List[str], child_topic_name
         print(f"Error inserting topic hierarchy: {e}")
         conn.rollback()
     
-# Parse JSON and create the database
-db_file = 'chat.db'
-create_database(db_file)
-conversation_infos, all_chats = parse_json('/Users/luc/law/chatgpt_export_12_29_24/conversations.json')
+# # Parse JSON and create the database
+# db_file = 'chat.db'
+# create_database(db_file)
+# conversation_infos, all_chats = parse_json('/Users/luc/law/chatgpt_export_12_29_24/conversations.json')
 
-# Insert conversations and chats with updated UUIDs
-insert_conversations_and_chats(db_file, conversation_infos, all_chats)
+# # Insert conversations and chats with updated UUIDs
+# insert_conversations_and_chats(db_file, conversation_infos, all_chats)

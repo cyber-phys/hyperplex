@@ -5,34 +5,34 @@ import sqlite3
 from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations
 
 app = Sanic("LexAid")
-app.config.CORS_ORIGINS = "http://localhost:3000"
+app.config.CORS_ORIGINS = "http://localhost:3001"
 extend = Extend(app)
 
-chat_db_path = 'chat_jn.db'
+chat_db_path = 'chat_2.db'
 law_db_path = 'law_database_old.db'
 
-@app.route('/api/chats', methods=['GET'])
+@app.get('/chats')
 async def get_chats(request):
     conn = connect_db(chat_db_path)
     chats = fetch_chats(conn)
     conn.close()
     return response.json(chats)
 
-@app.route('/api/topics', methods=['GET'])
+@app.get('/topics')
 async def get_topics(request):
     conn = connect_db(chat_db_path)
     topics = fetch_topics(conn)
     conn.close()
     return response.json(topics)
 
-@app.route('/api/chat_topics', methods=['GET'])
+@app.get('/chat_topics')
 async def get_chat_topics(request):
     conn = connect_db(chat_db_path)
     chat_topics = fetch_chat_topics(conn)
     conn.close()
     return response.json(chat_topics)
 
-@app.route('/api/chat_links', methods=['GET'])
+@app.get('/chat_links')
 async def get_chat_links(request):
     conn = connect_db(chat_db_path)
     chat_links = fetch_chat_links(conn)
