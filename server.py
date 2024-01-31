@@ -1,11 +1,51 @@
 from sanic import Sanic, response
 from sanic_ext import Extend
-from embedding import perform_search
+from embedding import perform_search, list_labels
 import sqlite3
 
 app = Sanic("LexAid")
-app.config.CORS_ORIGINS = "http://localhost:3002"
+app.config.CORS_ORIGINS = "http://localhost:3000"
 extend = Extend(app)
+
+@app.get("/labels")
+async def labels_handler(request):
+    """
+    Retrieve a list of labels and their associated colors from the labels table.
+    ---
+    operationId: listLabels
+    tags:
+      - labels
+    responses:
+      '200':
+        description: A list of labels with their colors.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  label_uuid:
+                    type: string
+                    description: The unique identifier for the label.
+                  label:
+                    type: string
+                    description: The name of the label.
+                  creation_time:
+                    type: string
+                    format: date-time
+                    description: The creation time of the label.
+                  color:
+                    type: string
+                    description: The color associated with the label.
+    """
+    labels = list_labels('law_database_old.db')
+    return response.json([{
+        'label_uuid': label[0],
+        'label': label[1],
+        'creation_time': label[2],
+        'color': label[3]
+    } for label in labels])
 
 @app.post("/search")
 async def search_handler(request):
@@ -32,6 +72,10 @@ async def search_handler(request):
                 type: integer
                 description: The number of top similar entries to return.
                 default: 5
+              label:
+                type: string
+                description: The label associated with the law entry.
+                default: None
     responses:
       '200':
         description: A list of similar entries based on the query, with additional details for each entry.
@@ -75,10 +119,13 @@ async def search_handler(request):
     model_name = body.get("model_name", "")
     query = body.get("query", "")
     top_k = body.get("top_k", 5)
+    label = body.get("label", None) 
+
+    print(label)
 
     # Assuming 'db_path' is a global variable or retrieved from configuration
     db_path = 'law_database_old.db'
-    similar_entries = perform_search(db_path, model_name, query, top_k)
+    similar_entries = perform_search(db_path, model_name, query, top_k, label)
     # Fetch the text for each similar entry
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()

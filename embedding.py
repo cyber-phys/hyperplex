@@ -52,8 +52,20 @@ def setup_database(db_path: str) -> None:
         CREATE TABLE IF NOT EXISTS labels (
             label_uuid TEXT PRIMARY KEY,
             label TEXT NOT NULL UNIQUE,
+            representations TEXT,
             creation_time TEXT NOT NULL,
-            color TEXT
+            color TEXT DEFAULT 'blue'
+        );
+    """)
+
+    # SQL statement to create the label_embeddings table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cluster_label_link (
+            label_uuid TEXT NOT NULL,
+            law_entry_uuid TEXT NOT NULL,
+            creation_time TEXT NOT NULL,
+            FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
+            FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid)
         );
     """)
 
@@ -76,7 +88,7 @@ def setup_database(db_path: str) -> None:
     conn.commit()
     conn.close()
 
-def fetch_law_entries(db_path):
+def fetch_entries(db_path):
     """
     Fetch all entries from the law_entries table in the database.
 
@@ -84,17 +96,17 @@ def fetch_law_entries(db_path):
         db_path (str): The path to the SQLite database.
 
     Returns:
-        list: A list of tuples containing the law entries.
+        tuple: Two lists, one containing the texts and the other containing the uuids of the law entries.
     """
     # Connect to the SQLite3 database
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # SQL statement to select all rows
-    select_all_sql = "SELECT * FROM law_entries;"
+    # SQL statement to select all texts and uuids
+    select_statement = "SELECT text, uuid FROM law_entries;"
     
     # Execute the SQL statement
-    cursor.execute(select_all_sql)
+    cursor.execute(select_statement)
     
     # Fetch all rows
     entries = cursor.fetchall()
@@ -102,7 +114,54 @@ def fetch_law_entries(db_path):
     # Close the connection
     conn.close()
     
-    return entries
+    # Unpack texts and uuids into separate lists
+    texts, uuids = zip(*entries) if entries else ([], [])
+    
+    return texts, uuids
+
+def store_cluster_link_entry(db_path: str, text: str, label_name: str) -> None:
+    """
+    Store an entry in the cluster_label_link table by finding the corresponding label_uuid and law_entry_uuid.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        text (str): The text of the law entry.
+        label_name (str): The name of the label.
+
+    Returns:
+        None
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    try:
+        # Find the label_uuid for the given label_name
+        cursor.execute("SELECT label_uuid FROM labels WHERE label = ?", (label_name,))
+        label_result = cursor.fetchone()
+        if not label_result:
+            raise ValueError(f"No label found with name '{label_name}'.")
+
+        label_uuid = label_result[0]
+
+        # Find the law_entry_uuid for the given text
+        cursor.execute("SELECT uuid FROM law_entries WHERE text = ?", (text,))
+        entry_result = cursor.fetchone()
+        if not entry_result:
+            raise ValueError(f"No law entry found with the given text.")
+
+        law_entry_uuid = entry_result[0]
+
+        # Insert into cluster_label_link table
+        cursor.execute("""
+            INSERT INTO cluster_label_link (label_uuid, law_entry_uuid, creation_time)
+            VALUES (?, ?, datetime('now'))
+        """, (label_uuid, law_entry_uuid))
+
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"An error occurred: {e}")
+    finally:
+        conn.close()
 
 def cluster_entries(db_path: str, model_name: str, min_community_size: int = 25, threshold: float = 0.75):
     """
@@ -299,12 +358,43 @@ def compute_query_embedding(model_name: str, query: str) -> torch.Tensor:
     query_embedding = model.encode(query, convert_to_tensor=True)
     return query_embedding
 
-def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5):
+def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5, label: str = None):
     """
     Search the embeddings table for the top-k most similar entries to the query embedding.
+    Optionally filter the search to only include entries linked to a specific label.
+
+    Args:
+        conn: The database connection object.
+        query_embedding (torch.Tensor): The query embedding tensor.
+        top_k (int, optional): The number of top similar entries to return. Defaults to 5.
+        label (str, optional): The label to filter the search by. Defaults to None.
+
+    Returns:
+        list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores.
     """
     cursor = conn.cursor()
-    cursor.execute("SELECT law_entry_uuid, embedding, char_start, char_end FROM embeddings")
+    # If a label is provided, first find the corresponding label_uuid
+    label_uuid = None
+    if label:
+        cursor.execute("SELECT label_uuid FROM labels WHERE label = ?", (label,))
+        label_row = cursor.fetchone()
+        if label_row:
+            label_uuid = label_row[0]
+        else:
+            print(f"No label found with text '{label}'.")
+            return []
+
+    # Modify the query based on whether a label_uuid has been found
+    if label_uuid:
+        cursor.execute("""
+            SELECT e.law_entry_uuid, e.embedding, e.char_start, e.char_end
+            FROM embeddings e
+            INNER JOIN cluster_label_link cll ON e.law_entry_uuid = cll.law_entry_uuid
+            WHERE cll.label_uuid = ?
+        """, (label_uuid,))
+    else:
+        cursor.execute("SELECT law_entry_uuid, embedding, char_start, char_end FROM embeddings")
+
     corpus_embeddings = []
     law_entry_uuids = []
     char_starts = []
@@ -344,7 +434,7 @@ def print_similar_entries(db_path: str, similar_entries):
     finally:
         conn.close()
 
-def perform_search(db_path: str, model_name: str, query: str, top_k: int = 5) -> list:
+def perform_search(db_path: str, model_name: str, query: str, top_k: int = 5, label: str = None) -> list:
     """
     Perform a search over the embeddings table using cosine similarity and return the similar entries.
 
@@ -359,7 +449,7 @@ def perform_search(db_path: str, model_name: str, query: str, top_k: int = 5) ->
     """
     conn = sqlite3.connect(db_path)
     query_embedding = compute_query_embedding(model_name, query)
-    similar_entries = search_embeddings(conn, query_embedding, top_k)
+    similar_entries = search_embeddings(conn, query_embedding, top_k, label)
     conn.close()
     return similar_entries
 
