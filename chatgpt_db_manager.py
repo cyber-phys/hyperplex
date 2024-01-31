@@ -85,7 +85,6 @@ def create_database(db_file):
         # Chat links table
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS chat_links (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_chat_id TEXT,
                 target_chat_id TEXT,
                 topic_id INTEGER,
@@ -118,27 +117,6 @@ def create_database(db_file):
 
         conn.close()
         print("Database and tables created successfully.")
-
-def generate_uuid() -> str:
-    """
-    Generate a unique UUID string.
-    """
-    return str(uuid.uuid4())
-
-def update_chat_ids_with_uuids(conversation: Dict, uuid_map: Dict[str, str]) -> Dict:
-    """
-    Update chat IDs and parent references in a conversation with new UUIDs.
-    """
-    def update_chat(chat):
-        new_chat = chat.copy()
-        new_chat["id"] = uuid_map.get(chat["id"], chat["id"])
-        if chat["parent"] in uuid_map:
-            new_chat["parent"] = uuid_map[chat["parent"]]
-        return new_chat
-
-    updated_chats = list(map(update_chat, conversation["mapping"].values()))
-    conversation["mapping"] = {chat["id"]: chat for chat in updated_chats}
-    return conversation
 
 def parse_json(file_path):
     with open(file_path, 'r') as f:
@@ -252,6 +230,368 @@ def insert_conversations_and_chats(db_file, conversation_infos, all_chats):
         conn.close()
         print("Conversations and chats inserted successfully.")
 
+def fetch_chat(conn, chat_id) -> Dict:
+    """
+    Fetch chat data by chat ID from the database and return it as a dictionary.
+
+    Parameters:
+    - conn: The database connection object.
+    - chat_id: The ID of the chat to fetch.
+
+    Returns:
+    - A dictionary containing the chat data, or None if not found.
+    """
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM chats WHERE id = ?", (chat_id,))
+        row = c.fetchone()
+        if row:
+            columns = [col[0] for col in c.description]
+            return dict(zip(columns, row))
+        return None
+    except Error as e:
+        print(f"Error fetching chat data: {e}")
+        return None
+
+def fetch_all_chats(conn) -> Dict[str, List]:
+    """
+    Fetch the entire chat history from the database and return it as a dictionary.
+    Each key in the dictionary corresponds to a column name, and its value is a list
+    of the data from that column across all rows.
+
+    Parameters:
+    - conn: The database connection object.
+
+    Returns:
+    - A dictionary with column names as keys and lists of column data as values.
+    """
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM chats")
+        rows = c.fetchall()
+        if rows:
+            columns = [col[0] for col in c.description]
+            # Using a dictionary comprehension to create the desired structure
+            # and map to aggregate the column data into lists
+            chat_history = {column: [row[idx] for row in rows] for idx, column in enumerate(columns)}
+            return chat_history
+        return {}
+    except Error as e:
+        print(f"Error fetching all chat data: {e}")
+        return {}
+
+def fetch_conversations_with_chats(conn) -> List[Dict]:
+    """
+    Fetch chats from the database and return them grouped by conversation_id.
+    Each group of chats for a specific conversation_id is represented as a dictionary,
+    with keys corresponding to column names and values being lists of data from those columns,
+    for all chats belonging to the same conversation_id.
+
+    Parameters:
+    - conn: The database connection object.
+
+    Returns:
+    - A list of dictionaries, where each dictionary represents all chats for a specific conversation_id.
+    """
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM chats ORDER BY conversation_id")
+        rows = c.fetchall()
+        
+        # If no rows are fetched, return an empty list
+        if not rows:
+            return []
+
+        # Initialize a list to hold dictionaries for each conversation
+        conversations = []
+        current_conversation_id = None
+        conversation_dict = {}
+
+        for row in rows:
+            columns = [col[0] for col in c.description]
+            chat_dict = dict(zip(columns, row))
+            
+            # Check if we're still on the same conversation
+            if chat_dict['conversation_id'] != current_conversation_id:
+                # If not, and if we have a previous conversation, add it to the list
+                if conversation_dict:
+                    conversations.append(conversation_dict)
+                # Start a new conversation dictionary
+                current_conversation_id = chat_dict['conversation_id']
+                conversation_dict = {col: [] for col in columns}
+            
+            # Append data from the current row to the appropriate lists in the conversation_dict
+            for col in columns:
+                conversation_dict[col].append(chat_dict[col])
+        
+        # Don't forget to add the last conversation to the list
+        if conversation_dict:
+            conversations.append(conversation_dict)
+
+        return conversations
+    except Error as e:
+        print(f"Error fetching conversations with chats: {e}")
+        return []
+    
+def fetch_message_pairs(conn) -> Dict[str, List]:
+    """
+    Fetch all message pairs (parent and child messages) from the database and return
+    them as a dictionary with specified keys. Each key in the dictionary corresponds
+    to an attribute of the message pairs, and its value is a list of the data for that
+    attribute across all message pairs.
+
+    Parameters:
+    - conn: The database connection object.
+
+    Returns:
+    - A dictionary with attributes as keys and lists of attribute data as values.
+    """
+    try:
+        c = conn.cursor()
+        # SQL query to join each chat with its parent and select the required attributes
+        query = """
+        SELECT
+            parent.id AS parent_id,
+            child.id AS child_id,
+            child.conversation_id,
+            child.create_time,
+            parent.message || ' ' || child.message AS message,
+            parent.author AS parent_author,
+            child.author AS child_author,
+            parent.model AS parent_model,
+            child.model AS child_model
+        FROM
+            chats AS child
+            INNER JOIN chats AS parent ON child.parent = parent.id
+        """
+        c.execute(query)
+        rows = c.fetchall()
+
+        # If we have results, transform them into the desired dictionary format
+        if rows:
+            # Initialize keys with empty lists
+            message_pairs = {
+                "parent_id": [],
+                "child_id": [],
+                "conversation_id": [],
+                "creation_time": [],
+                "message": [],
+                "parent_author": [],
+                "child_author": [],
+                "parent_model": [],
+                "child_model": []
+            }
+
+            # Populate the lists with data from each row
+            for row in rows:
+                message_pairs["parent_id"].append(row[0])
+                message_pairs["child_id"].append(row[1])
+                message_pairs["conversation_id"].append(row[2])
+                message_pairs["creation_time"].append(row[3])
+                message_pairs["message"].append(row[4])
+                message_pairs["parent_author"].append(row[5])
+                message_pairs["child_author"].append(row[6])
+                message_pairs["parent_model"].append(row[7])
+                message_pairs["child_model"].append(row[8])
+
+            return message_pairs
+        return {}
+    except Error as e:
+        print(f"Error fetching message pairs: {e}")
+        return {}
+    
+def insert_topics(conn, topic_names: List[str]):
+    """
+    Insert new topics into the database from a list of topic names, ensuring each topic is unique.
+
+    Parameters:
+    - conn: The database connection object.
+    - topic_names: A list of topic names to insert.
+    """
+    try:
+        c = conn.cursor()
+        # Prepare the SQL query to check if a topic already exists
+        check_query = "SELECT name FROM topics WHERE name = ?"
+        # Prepare the SQL query to insert a new topic
+        insert_query = "INSERT INTO topics (name) VALUES (?)"
+
+        for name in topic_names:
+            # Check if the topic already exists
+            c.execute(check_query, (name,))
+            result = c.fetchone()
+            if not result:
+                # If the topic does not exist, insert it
+                c.execute(insert_query, (name,))
+        # Commit the transaction to save all the changes
+        conn.commit()
+        print(f"Unique topics inserted successfully.")
+    except Error as e:
+        print(f"Error inserting unique topics: {e}")
+        # Rollback in case of error
+        conn.rollback()
+
+def insert_chat_topics(conn, chat_ids: List[str], topic_names: List[str]):
+    """
+    Insert new chat topics into the chat_topics table. This function takes in a list of chat_ids and topic_names,
+    finds the matching topic_id for each topic_name, and inserts the chat_id and topic_id into the chat_topics table.
+    If a topic_name does not exist in the topics table, it is inserted and its new topic_id is used.
+
+    Parameters:
+    - conn: The database connection object.
+    - chat_ids: A list of chat IDs.
+    - topic_names: A list of topic names.
+
+    Note: The function assumes that the lists chat_ids and topic_names are of the same size.
+    """
+    if len(chat_ids) != len(topic_names):
+        print("Error: The lists of chat IDs and topic names must be the same size.")
+        return
+
+    try:
+        c = conn.cursor()
+        for chat_id, topic_name in zip(chat_ids, topic_names):
+            # Check if the topic exists and get its ID
+            c.execute("SELECT id FROM topics WHERE name = ?", (topic_name,))
+            topic_result = c.fetchone()
+
+            if topic_result:
+                topic_id = topic_result[0]
+            else:
+                # Insert the new topic if it doesn't exist
+                c.execute("INSERT INTO topics (name) VALUES (?)", (topic_name,))
+                topic_id = c.lastrowid  # Get the ID of the newly inserted topic
+
+            # Insert the chat_id and topic_id into chat_topics
+            c.execute("INSERT INTO chat_topics (chat_id, topic_id) VALUES (?, ?)", (chat_id, topic_id))
+
+        conn.commit()
+        print("Chat topics inserted successfully.")
+    except Error as e:
+        print(f"Error inserting chat topics: {e}")
+        conn.rollback()
+
+def insert_chat_links(conn, source_chat_ids: List[str], target_chat_ids: List[str], topic_names: List[str]):
+    """
+    Insert new chat links into the chat_links table. This function takes in lists of source_chat_ids, target_chat_ids,
+    and topic_names, finds the matching topic_id for each topic_name, and inserts the source_chat_id, target_chat_id,
+    and topic_id into the chat_links table. If a topic_name does not exist in the topics table, it is inserted and its
+    new topic_id is used.
+
+    Parameters:
+    - conn: The database connection object.
+    - source_chat_ids: A list of source chat IDs.
+    - target_chat_ids: A list of target chat IDs.
+    - topic_names: A list of topic names.
+
+    Note: The function assumes that the lists source_chat_ids, target_chat_ids, and topic_names are of the same size.
+    """
+    if not (len(source_chat_ids) == len(target_chat_ids) == len(topic_names)):
+        print("Error: The lists of source chat IDs, target chat IDs, and topic names must be the same size.")
+        return
+
+    try:
+        c = conn.cursor()
+        for source_chat_id, target_chat_id, topic_name in zip(source_chat_ids, target_chat_ids, topic_names):
+            # Check if the topic exists and get its ID
+            c.execute("SELECT id FROM topics WHERE name = ?", (topic_name,))
+            topic_result = c.fetchone()
+
+            if topic_result:
+                topic_id = topic_result[0]
+            else:
+                # Insert the new topic if it doesn't exist
+                c.execute("INSERT INTO topics (name) VALUES (?)", (topic_name,))
+                topic_id = c.lastrowid  # Get the ID of the newly inserted topic
+
+            # Insert the source_chat_id, target_chat_id, and topic_id into chat_links
+            c.execute("INSERT INTO chat_links (source_chat_id, target_chat_id, topic_id) VALUES (?, ?, ?)", (source_chat_id, target_chat_id, topic_id))
+
+        conn.commit()
+        print("Chat links inserted successfully.")
+    except Error as e:
+        print(f"Error inserting chat links: {e}")
+        conn.rollback()
+
+def insert_conversation_topics(conn, conversation_id: str, topic_names: List[str]):
+    """
+    Insert new conversation topics into the conversation_topics table. This function takes in a single conversation_id
+    and a list of topic_names, finds the matching topic_id for each topic_name, and inserts the conversation_id and
+    topic_id into the conversation_topics table. If a topic_name does not exist in the topics table, it is inserted
+    and its new topic_id is used.
+
+    Parameters:
+    - conn: The database connection object.
+    - conversation_id: A single conversation ID.
+    - topic_names: A list of topic names.
+    """
+    try:
+        c = conn.cursor()
+        for topic_name in topic_names:
+            # Check if the topic exists and get its ID
+            c.execute("SELECT id FROM topics WHERE name = ?", (topic_name,))
+            topic_result = c.fetchone()
+
+            if topic_result:
+                topic_id = topic_result[0]
+            else:
+                # Insert the new topic if it doesn't exist
+                c.execute("INSERT INTO topics (name) VALUES (?)", (topic_name,))
+                topic_id = c.lastrowid  # Get the ID of the newly inserted topic
+
+            # Insert the conversation_id and topic_id into conversation_topics
+            c.execute("INSERT INTO conversation_topics (conversation_id, topic_id) VALUES (?, ?)", (conversation_id, topic_id))
+
+        conn.commit()
+        print("Conversation topics inserted successfully.")
+    except Error as e:
+        print(f"Error inserting conversation topics: {e}")
+        conn.rollback()
+
+def insert_topic_hierarchy(conn, parent_topic_names: List[str], child_topic_names: List[str]):
+    """
+    Insert new entries into the topic_hierarchy table. This function takes in lists of parent topic_names and child topic_names,
+    finds the topic_ids for the parents and children, and inserts them into the table. An error is printed if the lists are not
+    the same size or if a match for the topic_id cannot be found.
+
+    Parameters:
+    - conn: The database connection object.
+    - parent_topic_names: A list of parent topic names.
+    - child_topic_names: A list of child topic names.
+    """
+    if len(parent_topic_names) != len(child_topic_names):
+        print("Error: The lists of parent topic names and child topic names must be the same size.")
+        return
+
+    try:
+        c = conn.cursor()
+        for parent_name, child_name in zip(parent_topic_names, child_topic_names):
+            # Find or insert the parent topic_id
+            c.execute("SELECT id FROM topics WHERE name = ?", (parent_name,))
+            parent_result = c.fetchone()
+            if parent_result:
+                parent_id = parent_result[0]
+            else:
+                print(f"Error: No match found for parent topic name '{parent_name}'.")
+                return
+
+            # Find or insert the child topic_id
+            c.execute("SELECT id FROM topics WHERE name = ?", (child_name,))
+            child_result = c.fetchone()
+            if child_result:
+                child_id = child_result[0]
+            else:
+                print(f"Error: No match found for child topic name '{child_name}'.")
+                return
+
+            # Insert the parent_id and child_id into topic_hierarchy
+            c.execute("INSERT INTO topic_hierarchy (parent_id, child_id) VALUES (?, ?)", (parent_id, child_id))
+
+        conn.commit()
+        print("Topic hierarchy entries inserted successfully.")
+    except Error as e:
+        print(f"Error inserting topic hierarchy: {e}")
+        conn.rollback()
+    
 # Parse JSON and create the database
 db_file = 'chat.db'
 create_database(db_file)
