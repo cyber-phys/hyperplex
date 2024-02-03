@@ -1,0 +1,5 @@
+requests
+lxml
+markdownify
+sanic
+sanic-ext
