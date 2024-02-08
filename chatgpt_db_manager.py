@@ -798,6 +798,39 @@ def insert_hierarchical_topics_as_dag(conn, hier_topics: pd.DataFrame):
         print(f"Error inserting hierarchical topics as DAG: {e}")
         conn.rollback()
 
+def find_disjoint_conversation_links(conn):
+    """
+    Find all possible, but not valid, links between messages across disjointed conversations.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of RDF triples as strings, formatted as source_chat_id, source_author_to_target_author, target_chat_id.
+    """
+    try:
+        c = conn.cursor()
+        # Fetch all chats with their conversation_id and author
+        c.execute("SELECT id, conversation_id, author FROM chats")
+        chats = c.fetchall()
+
+        # Generate all possible pairs of chats that are in different conversations
+        disjoint_pairs = [
+            (chat1, chat2) for chat1 in chats for chat2 in chats
+            if chat1[1] != chat2[1]
+        ]
+
+        # Format the pairs into RDF triples
+        rdf_triples = [
+            f"{pair[0][0]} {pair[0][2]}_to_{pair[1][2]} {pair[1][0]}"
+            for pair in disjoint_pairs
+        ]
+
+        return rdf_triples
+    except Error as e:
+        print(f"Error finding disjoint conversation links: {e}")
+        return []
+
 def generate_rdf_triples(conn):
     """
     Generate RDF triples from chat links, chat topics, and topic links.
@@ -831,25 +864,57 @@ def generate_rdf_triples(conn):
 
     return rdf_triples
 
-def main(db_file, output_file=None):
-    conn = connect_db(db_file)
+def generate_rdf_subcommand(args):
+    conn = connect_db(args.db_file)
     if conn is not None:
         rdf_triples = generate_rdf_triples(conn)
-        if output_file:
-            with open(output_file, "w") as file:
+        if args.output:
+            with open(args.output, "w") as file:
                 for triple in rdf_triples:
                     file.write(triple + "\n")
-            print(f"RDF triples have been written to {output_file}")
+            print(f"RDF triples have been written to {args.output}")
         else:
             for triple in rdf_triples[:5]:  # Print the first 5 triples for demonstration
                 print(triple)
     else:
         print("Failed to connect to the database.")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate RDF triples from chat database.")
-    parser.add_argument("db_file", help="Path to the SQLite database file.")
-    parser.add_argument("-o", "--output", help="Path to the output file for RDF triples.", default=None)
+def find_disjoint_subcommand(args):
+    conn = connect_db(args.db_file)
+    if conn is not None:
+        rdf_triples = find_disjoint_conversation_links(conn)
+        if args.output:
+            with open(args.output, "w") as file:
+                for triple in rdf_triples:
+                    file.write(triple + "\n")
+            print(f"Disjoint conversation links have been written to {args.output}")
+        else:
+            for triple in rdf_triples[:5]:  # Print the first 5 triples for demonstration
+                print(triple)
+    else:
+        print("Failed to connect to the database.")
+
+def main():
+    parser = argparse.ArgumentParser(description="Chat database management and RDF triple generation.")
+    subparsers = parser.add_subparsers(help='commands')
+
+    # Generate RDF triples command
+    rdf_parser = subparsers.add_parser('generate_rdf', help='Generate RDF triples from chat database.')
+    rdf_parser.add_argument("db_file", help="Path to the SQLite database file.")
+    rdf_parser.add_argument("-o", "--output", help="Path to the output file for RDF triples.", default=None)
+    rdf_parser.set_defaults(func=generate_rdf_subcommand)
+
+    # Find disjoint conversation links command
+    disjoint_parser = subparsers.add_parser('find_disjoint', help='Find disjoint conversation links and output RDF triples.')
+    disjoint_parser.add_argument("db_file", help="Path to the SQLite database file.")
+    disjoint_parser.add_argument("-o", "--output", help="Path to the output file for RDF triples.", default=None)
+    disjoint_parser.set_defaults(func=find_disjoint_subcommand)
 
     args = parser.parse_args()
-    main(args.db_file, args.output)
+    if hasattr(args, 'func'):
+        args.func(args)
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()
