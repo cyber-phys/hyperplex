@@ -5,7 +5,9 @@ from functools import partial, reduce
 import uuid
 from typing import Dict, List, Tuple
 import pandas as pd
-
+import argparse
+import chatgpt_db_manager as cm
+import argparse
 
 def connect_db(db_file):
     """Attempt to connect to the SQLite database and return the connection object."""
@@ -795,3 +797,59 @@ def insert_hierarchical_topics_as_dag(conn, hier_topics: pd.DataFrame):
     except Error as e:
         print(f"Error inserting hierarchical topics as DAG: {e}")
         conn.rollback()
+
+def generate_rdf_triples(conn):
+    """
+    Generate RDF triples from chat links, chat topics, and topic links.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of RDF triples as strings.
+    """
+    rdf_triples = []
+
+    # Fetch chat links and generate triples
+    chat_links = fetch_chat_links(conn)
+    for link in chat_links:
+        triple = f"{link['source_chat_id']} {link['label']} {link['target_chat_id']}"
+        next_message_triple = f"{link['source_chat_id']} {link['source_author']}_to_{link['target_author']} {link['target_chat_id']}"
+        rdf_triples.extend([triple, next_message_triple])
+
+    # Fetch chat topics and generate triples
+    chat_topics = fetch_chat_topics(conn)
+    for link in chat_topics:
+        triple = f"{link['label']} chat_type {link['chat_id']}"
+        rdf_triples.append(triple)
+
+    # Fetch topic links and generate triples
+    topic_links = fetch_topic_links(conn)
+    for link in topic_links:
+        triple = f"{link['parent_label']} is_member_of {link['child_label']}"
+        rdf_triples.append(triple)
+
+    return rdf_triples
+
+def main(db_file, output_file=None):
+    conn = connect_db(db_file)
+    if conn is not None:
+        rdf_triples = generate_rdf_triples(conn)
+        if output_file:
+            with open(output_file, "w") as file:
+                for triple in rdf_triples:
+                    file.write(triple + "\n")
+            print(f"RDF triples have been written to {output_file}")
+        else:
+            for triple in rdf_triples[:5]:  # Print the first 5 triples for demonstration
+                print(triple)
+    else:
+        print("Failed to connect to the database.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Generate RDF triples from chat database.")
+    parser.add_argument("db_file", help="Path to the SQLite database file.")
+    parser.add_argument("-o", "--output", help="Path to the output file for RDF triples.", default=None)
+
+    args = parser.parse_args()
+    main(args.db_file, args.output)
