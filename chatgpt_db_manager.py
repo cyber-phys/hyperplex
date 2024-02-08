@@ -4,6 +4,8 @@ from sqlite3 import Error
 from functools import partial, reduce
 import uuid
 from typing import Dict, List, Tuple
+import pandas as pd
+
 
 def connect_db(db_file):
     """Attempt to connect to the SQLite database and return the connection object."""
@@ -272,26 +274,85 @@ def fetch_topics(conn):
     return fetch_table_data(conn, "SELECT * FROM topics")
 
 def fetch_chat_topics(conn):
-    return fetch_table_data(conn, "SELECT * FROM chat_topics")
+    """
+    Fetch chat topics from the database, including the label name for each chat topic.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of dictionaries, each representing a chat topic with an additional 'label' field for the topic label name.
+    """
+    try:
+        cursor = conn.cursor()
+        query = """
+        SELECT ct.chat_id, ct.topic_id, t.name AS label
+        FROM chat_topics ct
+        JOIN topics t ON ct.topic_id = t.id
+        """
+        cursor.execute(query)
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    except Error as e:
+        print(f"Error fetching chat topics with labels: {e}")
+        return []
+
+def fetch_topic_links(conn):
+    """
+    Fetch topic links from the database, including the labels for the parent and child topics.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of dictionaries, each representing a topic link with labels for both parent and child topics.
+    """
+    try:
+        c = conn.cursor()
+        query = """
+        SELECT 
+            th.parent_topic_id, 
+            pt.name AS parent_label, 
+            th.child_topic_id, 
+            ct.name AS child_label
+        FROM topic_hierarchy th
+        JOIN topics pt ON th.parent_topic_id = pt.id
+        JOIN topics ct ON th.child_topic_id = ct.id
+        """
+        c.execute(query)
+        rows = c.fetchall()
+        
+        # Transform the rows into a list of dictionaries using a list comprehension
+        topic_links = [
+            {"parent_topic_id": row[0], "parent_label": row[1], "child_topic_id": row[2], "child_label": row[3]}
+            for row in rows
+        ]
+        
+        return topic_links
+    except Error as e:
+        print(f"Error fetching topic links: {e}")
+        return []
 
 def fetch_chat_links(conn):
     """
-    Fetch chat links from the database, including the topic label name for each chat link.
+    Fetch chat links from the database, including the topic label name for each chat link, and the authors of the source and target chats.
     Each chat link will also have a UUIDv4 generated as its id.
     
     Parameters:
     - conn: The database connection object.
     
     Returns:
-    - A list of dictionaries, each representing a chat link with an additional 'label' field for the topic label name and a UUIDv4 as 'id'.
+    - A list of dictionaries, each representing a chat link with an additional 'label' field for the topic label name, 'source_author', 'target_author', and a UUIDv4 as 'id'.
     """
     try:
         cursor = conn.cursor()
-        # Modified SQL query to join chat_links with topics to fetch the topic name as label
+        # Modified SQL query to join chat_links with topics to fetch the topic name as label, and also join with chats to get the authors
         query = """
-        SELECT cl.source_chat_id, cl.target_chat_id, cl.topic_id, t.name AS label
+        SELECT cl.source_chat_id, cl.target_chat_id, cl.topic_id, t.name AS label, sc.author AS source_author, tc.author AS target_author
         FROM chat_links cl
         JOIN topics t ON cl.topic_id = t.id
+        JOIN chats sc ON cl.source_chat_id = sc.id
+        JOIN chats tc ON cl.target_chat_id = tc.id
         """
         cursor.execute(query)
         chat_links = cursor.fetchall()
@@ -303,16 +364,18 @@ def fetch_chat_links(conn):
                 "source_chat_id": chat_link[0],
                 "target_chat_id": chat_link[1],
                 "topic_id": chat_link[2],
-                "label": chat_link[3]
+                "label": chat_link[3],
+                "source_author": chat_link[4],
+                "target_author": chat_link[5]
             }
             for chat_link in chat_links
         ]
         
         return result
     except Error as e:
-        print(f"Error fetching chat links with topics: {e}")
+        print(f"Error fetching chat links with topics and authors: {e}")
         return []
-
+    
 def fetch_conversations(conn):
     """
     Fetch conversations from the database using the fetch_table_data function.
@@ -682,10 +745,53 @@ def insert_topic_hierarchy(conn, parent_topic_names: List[str], child_topic_name
         print(f"Error inserting topic hierarchy: {e}")
         conn.rollback()
     
-# # Parse JSON and create the database
-# db_file = 'chat.db'
-# create_database(db_file)
-# conversation_infos, all_chats = parse_json('/Users/luc/law/chatgpt_export_12_29_24/conversations.json')
+def insert_hierarchical_topics_as_dag(conn, hier_topics: pd.DataFrame):
+    """
+    Convert hierarchical topics represented as a left-child right-sibling binary tree
+    into a DAG and insert the relationships into the topic_hierarchy table, avoiding duplicates
+    and self-links.
 
-# # Insert conversations and chats with updated UUIDs
-# insert_conversations_and_chats(db_file, conversation_infos, all_chats)
+    Parameters:
+    - conn: The database connection object.
+    - hier_topics: A DataFrame containing hierarchical topics with columns for parent, child_left, and child_right.
+    """
+    try:
+        c = conn.cursor()
+
+        # Function to ensure a topic exists in the topics table and return its ID
+        def ensure_topic_exists(name):
+            c.execute("SELECT id FROM topics WHERE name = ?", (name,))
+            result = c.fetchone()
+            if result:
+                return result[0]
+            else:
+                c.execute("INSERT INTO topics (name) VALUES (?)", (name,))
+                return c.lastrowid
+
+        # Function to check if a parent-child relationship already exists
+        def relationship_exists(parent_id, child_id):
+            c.execute("SELECT 1 FROM topic_hierarchy WHERE parent_topic_id = ? AND child_topic_id = ?", (parent_id, child_id))
+            return c.fetchone() is not None
+
+        # Process each row in the hierarchical topics DataFrame
+        for _, row in hier_topics.iterrows():
+            parent_name = row['Parent_Name']
+            child_left_name = row['Child_Left_Name']
+            child_right_name = row['Child_Right_Name']
+
+            # Ensure all topics exist in the topics table and get their IDs
+            parent_id = ensure_topic_exists(parent_name)
+            child_left_id = ensure_topic_exists(child_left_name)
+            child_right_id = ensure_topic_exists(child_right_name)
+
+            # Insert parent-child relationships into topic_hierarchy, avoiding duplicates and self-links
+            if parent_id != child_left_id and not relationship_exists(parent_id, child_left_id):
+                c.execute("INSERT INTO topic_hierarchy (parent_topic_id, child_topic_id) VALUES (?, ?)", (parent_id, child_left_id))
+            if parent_id != child_right_id and child_left_id != child_right_id and not relationship_exists(parent_id, child_right_id):
+                c.execute("INSERT INTO topic_hierarchy (parent_topic_id, child_topic_id) VALUES (?, ?)", (parent_id, child_right_id))
+
+        conn.commit()
+        print("Hierarchical topics inserted into DAG successfully, avoiding duplicates and self-links.")
+    except Error as e:
+        print(f"Error inserting hierarchical topics as DAG: {e}")
+        conn.rollback()
