@@ -282,6 +282,7 @@ def fetch_entries_with_embeddings_specific_chunk(db_path: str, chunk_size: int, 
 def store_cluster_link_entry(db_path: str, text: str, label_name: str) -> None:
     """
     Store an entry in the cluster_label_link table by finding the corresponding label_uuid and law_entry_uuid.
+    Avoid inserting a duplicate entry if a link already exists.
 
     Args:
         db_path (str): The path to the SQLite database.
@@ -311,13 +312,22 @@ def store_cluster_link_entry(db_path: str, text: str, label_name: str) -> None:
 
         law_entry_uuid = entry_result[0]
 
-        # Insert into cluster_label_link table
+        # Check if the link already exists
         cursor.execute("""
-            INSERT INTO cluster_label_link (label_uuid, law_entry_uuid, creation_time)
-            VALUES (?, ?, datetime('now'))
+            SELECT * FROM cluster_label_link
+            WHERE label_uuid = ? AND law_entry_uuid = ?
         """, (label_uuid, law_entry_uuid))
+        link_exists = cursor.fetchone()
 
-        conn.commit()
+        if not link_exists:
+            # Insert into cluster_label_link table
+            cursor.execute("""
+                INSERT INTO cluster_label_link (label_uuid, law_entry_uuid, creation_time)
+                VALUES (?, ?, datetime('now'))
+            """, (label_uuid, law_entry_uuid))
+            conn.commit()
+        else:
+            print("Link between law entry and label already exists. No new entry inserted.")
     except sqlite3.Error as e:
         print(f"An error occurred: {e}")
     finally:
@@ -406,24 +416,35 @@ def insert_user_label_text(db_path: str, label_name: str, text_uuid: str, char_s
 
 def insert_label(db_path, label_text, color='blue'):
     """
-    Insert a new label into the labels table.
+    Insert a new label into the labels table if it doesn't already exist.
 
     Args:
-        conn: The database connection object.
+        db_path (str): The path to the SQLite database.
         label_text (str): The text of the label to insert.
         color (str, optional): The color associated with the label.
 
     Returns:
-        str: The UUID of the inserted label.
+        str: The UUID of the inserted or existing label.
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    label_uuid = str(uuid4())
-    cursor.execute("""
-        INSERT INTO labels (label_uuid, label, creation_time, color)
-        VALUES (?, ?, datetime('now'), ?)
-    """, (label_uuid, label_text, color))
-    conn.commit()
+
+    # Check if the label already exists
+    cursor.execute("SELECT label_uuid FROM labels WHERE label = ?", (label_text,))
+    existing_label = cursor.fetchone()
+
+    if existing_label:
+        label_uuid = existing_label[0]  # Use the existing label's UUID
+    else:
+        # If the label does not exist, insert a new one
+        label_uuid = str(uuid4())
+        cursor.execute("""
+            INSERT INTO labels (label_uuid, label, creation_time, color)
+            VALUES (?, ?, datetime('now'), ?)
+        """, (label_uuid, label_text, color))
+        conn.commit()
+
+    conn.close()
     return label_uuid
 
 def list_labels(db_path):
