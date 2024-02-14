@@ -1,6 +1,6 @@
 from sanic import Sanic, response
 from sanic_ext import Extend
-from embedding import perform_search, list_labels, insert_user_label_text, process_topics
+from embedding import perform_search, list_labels, insert_user_label_text, process_topics, process_topics_with_user_labels, get_user_labels
 import sqlite3
 from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations, fetch_predicted_chat_links
 
@@ -9,7 +9,7 @@ app.config.CORS_ORIGINS = "http://localhost:3000"
 extend = Extend(app)
 
 chat_db_path = 'chat_666.db'
-law_db_path = 'law_database_old.db'
+law_db_path = 'law_database.db'
 
 @app.get('/chats')
 async def get_chats(request):
@@ -27,7 +27,7 @@ async def get_topics(request):
 
 @app.get('/chat_topics')
 async def get_chat_topics(request):
-    conn = connect_db(chat_db_path)ß
+    conn = connect_db(chat_db_path)
     chat_topics = fetch_chat_topics(conn)
     conn.close()
     return response.json(chat_topics)
@@ -56,6 +56,28 @@ async def conversations_handler(request):
     conversations = fetch_conversations(conn)
     conn.close()
     return response.json(conversations)
+
+@app.get("/user_labels")
+async def user_labels_handler(request):
+    """
+    Retrieve a list of user labels from the database and return them as JSON.
+    ---
+    operationId: listUserLabels
+    tags:
+      - labels
+    responses:
+      '200':
+        description: A list of user labels.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                description: The name of the user label.
+    """
+    labels = get_user_labels(law_db_path)
+    return response.json(labels)
 
 @app.post("/add_user_label")
 async def add_user_label(request):
@@ -107,6 +129,7 @@ async def add_user_label(request):
 
     try:
         insert_user_label_text(law_db_path, label_name, text_uuid, char_start, char_end)
+        print("Added label")
         return response.json({"success": True, "message": "Label added successfully."})
     except Exception as e:
         return response.json({"success": False, "message": str(e)})
@@ -140,6 +163,39 @@ async def process_topics_handler(request):
         # and it performs all the steps as required.
         process_topics(law_db_path)
         return response.json({"success": True, "message": "Topics processed successfully."})
+    except Exception as e:
+        return response.json({"success": False, "message": str(e)})
+    
+@app.post("/process_topics_with_user_labels")
+async def process_topics_with_user_labels_handler(request):
+    """
+    Process topics and user labels by creating a BERTopic model, fitting it to the texts,
+    inserting topic labels and user labels into the database, and storing cluster link entries.
+    ---
+    operationId: processTopicsWithUserLabels
+    tags:
+      - topics
+      - labels
+    responses:
+      '200':
+        description: Success message after processing topics and user labels.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  description: True if the topics and user labels were processed successfully, false otherwise.
+                message:
+                  type: string
+                  description: A message detailing the result of the operation.
+    """
+    try:
+        # This function should be defined in the embedding module and should
+        # include the logic for processing user labels along with topics.
+        process_topics_with_user_labels(law_db_path)
+        return response.json({"success": True, "message": "Topics and user labels processed successfully."})
     except Exception as e:
         return response.json({"success": False, "message": str(e)})
 

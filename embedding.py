@@ -52,11 +52,12 @@ def setup_database(db_path: str) -> None:
     # SQL statement to create the labels table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS labels (
-            label_uuid TEXT PRIMARY KEY,
+            label_uuid TEXT UNIQUE,
             label TEXT NOT NULL UNIQUE,
-            representations TEXT,
             creation_time TEXT NOT NULL,
-            color TEXT DEFAULT 'blue'
+            color TEXT DEFAULT 'blue',
+            is_user_label BOOLEAN NOT NULL DEFAULT 0,
+            bert_id INTEGER PRIMARY KEY AUTOINCREMENT
         );
     """)
 
@@ -87,14 +88,6 @@ def setup_database(db_path: str) -> None:
         );
     """)
 
-    # Create user_labels table if it does not exist
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_labels (
-            label_uuid TEXT PRIMARY KEY,
-            label TEXT NOT NULL UNIQUE
-        );
-    """)
-
     # Create user_label_texts table if it does not exist
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_label_texts (
@@ -103,13 +96,94 @@ def setup_database(db_path: str) -> None:
             creation_time TEXT NOT NULL,
             char_start INTEGER NOT NULL,
             char_end INTEGER NOT NULL,
-            FOREIGN KEY(label_uuid) REFERENCES user_labels(label_uuid),
+            FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
             FOREIGN KEY(text_uuid) REFERENCES law_entries(uuid)
         );
     """)
 
     conn.commit()
     conn.close()
+
+def get_user_labels(db_path: str) -> list:
+    """
+    Retrieve all user labels from the database.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+
+    Returns:
+        list: A list of user labels.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT label FROM labels WHERE is_user_label = 1")
+    labels = cursor.fetchall()
+    conn.close()
+    return [label[0] for label in labels]
+
+def fetch_entries_with_user_labels(db_path: str) -> tuple:
+    """
+    Fetch all entries from the law_entries table and their associated user labels and bert_label_ids from the database.
+    If an entry has no associated user label, it is marked with "" and bert_label_id is marked with -1.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+
+    Returns:
+        tuple: Four lists, one containing the texts, one containing the user label names (or "" if none), 
+               one containing the uuids of the law entries, and one containing the associated bert_label_ids (or -1 if none).
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Fetch all law entries
+    cursor.execute("SELECT uuid, text FROM law_entries")
+    entries = cursor.fetchall()
+    entries_dict = {uuid: text for uuid, text in entries}
+
+    # Fetch all user labels and bert_label_ids associated with texts
+    cursor.execute("""
+        SELECT text_uuid, label, COALESCE(bli.id, -1) as bert_label_id
+        FROM user_label_texts ult
+        INNER JOIN labels l ON ult.label_uuid = l.label_uuid AND l.is_user_label = 1
+        LEFT JOIN bert_label_id bli ON l.label_uuid = bli.label_uuid
+    """)
+    labels = cursor.fetchall()
+
+    # Create dictionaries to associate texts with their labels and bert_label_ids
+    labels_dict = {}
+    bert_label_ids_dict = {}
+    for text_uuid, label, bert_label_id in labels:
+        if text_uuid in labels_dict:
+            labels_dict[text_uuid].append(label)
+            bert_label_ids_dict[text_uuid].append(bert_label_id)
+        else:
+            labels_dict[text_uuid] = [label]
+            bert_label_ids_dict[text_uuid] = [bert_label_id]
+
+    # Prepare the result lists
+    texts_with_labels = []
+    labels_list = []
+    uuids_with_labels = []
+    bert_label_ids_list = []
+
+    for uuid, text in entries_dict.items():
+        if uuid in labels_dict:
+            for label, bert_label_id in zip(labels_dict[uuid], bert_label_ids_dict[uuid]):
+                texts_with_labels.append(text)
+                labels_list.append(label)
+                uuids_with_labels.append(uuid)
+                bert_label_ids_list.append(bert_label_id)
+        else:
+            texts_with_labels.append(text)
+            labels_list.append("")
+            uuids_with_labels.append(uuid)
+            bert_label_ids_list.append(-1)
+
+    # Close the connection
+    conn.close()
+
+    return texts_with_labels, labels_list, uuids_with_labels, bert_label_ids_list
 
 def fetch_entries(db_path):
     """
@@ -141,6 +215,45 @@ def fetch_entries(db_path):
     texts, uuids = zip(*entries) if entries else ([], [])
     
     return texts, uuids
+
+def fetch_entries_with_embeddings(db_path: str) -> tuple:
+    """
+    Fetch all entries from the law_entries table in the database along with their embeddings.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+
+    Returns:
+        tuple: Three lists, one containing the texts, one containing the uuids of the law entries, and one containing the embeddings.
+    """
+    # Connect to the SQLite3 database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # SQL statement to join law_entries and embeddings tables and select texts, uuids, and embeddings
+    select_statement = """
+    SELECT le.text, le.uuid, e.embedding
+    FROM law_entries le
+    INNER JOIN embeddings e ON le.uuid = e.law_entry_uuid;
+    """
+    
+    # Execute the SQL statement
+    cursor.execute(select_statement)
+    
+    # Fetch all rows
+    entries = cursor.fetchall()
+    
+    # Close the connection
+    conn.close()
+    
+    # If there are no entries, return empty lists
+    if not entries:
+        return ([], [], [])
+    
+    # Unpack texts, uuids, and embeddings into separate lists
+    texts, uuids, embeddings = zip(*[(entry[0], entry[1], torch.Tensor(numpy.frombuffer(entry[2], dtype=numpy.float32))) for entry in entries])
+    
+    return texts, uuids, embeddings
 
 def store_cluster_link_entry(db_path: str, text: str, label_name: str) -> None:
     """
@@ -247,16 +360,16 @@ def insert_user_label_text(db_path: str, label_name: str, text_uuid: str, char_s
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Find or create the label_uuid for the given label_name
-    cursor.execute("SELECT label_uuid FROM user_labels WHERE label = ?", (label_name,))
+    # Check if the label exists; if not, create it
+    cursor.execute("SELECT label_uuid FROM labels WHERE label = ?", (label_name,))
     label_result = cursor.fetchone()
 
     if label_result:
         label_uuid = label_result[0]
     else:
-        # If the label does not exist, create a new one
+        # If the label does not exist or is not a user label, create a new user label
         label_uuid = str(uuid4())
-        cursor.execute("INSERT INTO user_labels (label_uuid, label) VALUES (?, ?)", (label_uuid, label_name))
+        cursor.execute("INSERT INTO labels (label_uuid, label, is_user_label) VALUES (?, ?, 1)", (label_uuid, label_name))
     
     # Insert the new label text into user_label_texts table
     cursor.execute("""
@@ -531,6 +644,35 @@ def process_topics(db_path: str):
     # Step 2: Create a BERTopic model and fit it to the texts
     topic_model = BERTopic()
     topics, probs = topic_model.fit_transform(texts)
+
+    # Step 3: Insert the topic labels into the database
+    topic_info = topic_model.get_topic_info()
+    topic_names = topic_info['Name'].tolist()
+    for topic_name in topic_names:
+        insert_label(db_path, topic_name)
+
+    # Step 4: Store the cluster link entries in the database
+    document_info = topic_model.get_document_info(texts)
+    documents = document_info['Document'].tolist()
+    names = document_info['Name'].tolist()
+    for doc, name in zip(documents, names):
+        store_cluster_link_entry(db_path, doc, name)
+
+    # # Optional: Use HDBSCAN for clustering with BERTopic
+    # hdbscan_model = HDBSCAN(min_cluster_size=15, metric='euclidean', cluster_selection_method='eom', prediction_data=True)
+    # topic_model_cluster = BERTopic(hdbscan_model=hdbscan_model)
+    # topics_cluster, probs_cluster = topic_model_cluster.fit_transform(texts)
+
+    # # Return the topic model information
+    # return topic_model_cluster.get_topic_info()
+
+def process_topics_with_user_labels(db_path: str):
+    # Step 1: Fetch entries from the database
+    texts, labels, uuids = fetch_entries_with_user_labels(db_path)
+
+    # Step 2: Create a BERTopic model and fit it to the texts
+    topic_model = BERTopic()
+    topics, probs = topic_model.fit_transform(texts, y=labels)
 
     # Step 3: Insert the topic labels into the database
     topic_info = topic_model.get_topic_info()
