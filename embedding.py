@@ -251,7 +251,10 @@ def fetch_entries_with_embeddings(db_path: str) -> tuple:
         return ([], [], [])
     
     # Unpack texts, uuids, and embeddings into separate lists
-    texts, uuids, embeddings = zip(*[(entry[0], entry[1], torch.Tensor(numpy.frombuffer(entry[2], dtype=numpy.float32))) for entry in entries])
+    texts, uuids, embeddings_list = zip(*[(entry[0], entry[1], numpy.frombuffer(entry[2], dtype=numpy.float32)) for entry in entries])
+    
+    # Convert list of embeddings to a single NumPy array
+    embeddings = numpy.stack(embeddings_list)
     
     return texts, uuids, embeddings
 
