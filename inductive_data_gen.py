@@ -31,7 +31,7 @@ def read_rdf_triples(file_path):
 def write_rdf_triples(file_path, triples):
     with open(file_path, 'w') as file:
         for triple in triples:
-            file.write(' '.join(triple) + '\n')
+            file.write(''.join(triple) + '\n')
 
 ### Algorithm 2: Generating Datasets for Inductive Knowledge Graph Completion
 # **Input:**  
@@ -165,6 +165,6 @@ if __name__ == '__main__':
     # Generate the inductive datasets
     output_tr, output_inf = generate_inductive_datasets(args.input, args.output, n_tr, n_inf, p_rel, p_tri)
 
-    # Print out the names of the generated files
+    # Print ot the names of the generated files
     print(f'Training dataset written to {output_tr}')
     print(f'Inductive dataset written to {output_inf}')
