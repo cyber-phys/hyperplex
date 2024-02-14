@@ -52,12 +52,11 @@ def fetch_entries_with_user_labels(db_path: str) -> tuple:
     entries = cursor.fetchall()
     entries_dict = {uuid: text for uuid, text in entries}
 
-    # Fetch all user labels and bert_label_ids associated with texts
+    # Adjusted SQL query to fetch all user labels and their bert_label_ids directly from the labels table
     cursor.execute("""
-        SELECT text_uuid, label, COALESCE(bli.id, -1) as bert_label_id
+        SELECT text_uuid, l.label, COALESCE(l.bert_id, -1) as bert_label_id
         FROM user_label_texts ult
         INNER JOIN labels l ON ult.label_uuid = l.label_uuid AND l.is_user_label = 1
-        LEFT JOIN bert_label_id bli ON l.label_uuid = bli.label_uuid
     """)
     labels = cursor.fetchall()
 
@@ -134,12 +133,12 @@ def fetch_entries_with_user_labels_and_embeddings_chunk(db_path: str, chunk_size
     offset = (chunk_number - 1) * chunk_size
 
     # Modify the SQL query to fetch only the specific chunk of data, including embeddings
+    # Adjusted to fetch bert_label_id directly from the labels table
     select_statement = """
-    SELECT le.text, le.uuid, COALESCE(l.label, '') as label, COALESCE(bli.id, -1) as bert_label_id, e.embedding
+    SELECT le.text, le.uuid, COALESCE(l.label, '') as label, COALESCE(l.bert_id, -1) as bert_label_id, e.embedding
     FROM law_entries le
     LEFT JOIN user_label_texts ult ON le.uuid = ult.text_uuid
     LEFT JOIN labels l ON ult.label_uuid = l.label_uuid AND l.is_user_label = 1
-    LEFT JOIN bert_label_id bli ON l.label_uuid = bli.label_uuid
     LEFT JOIN embeddings e ON le.uuid = e.law_entry_uuid
     GROUP BY le.uuid, l.label
     ORDER BY le.uuid
