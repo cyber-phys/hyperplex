@@ -169,6 +169,116 @@ def fetch_entries_with_embeddings(db_path: str) -> tuple:
     
     return texts, uuids, embeddings
 
+def fetch_entries_with_embeddings_chunked(db_path: str, chunk_size: int) -> list:
+    """
+    Fetch all entries from the law_entries table in the database along with their embeddings,
+    and return them in chunks of a specified size.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        chunk_size (int): The size of each chunk.
+
+    Returns:
+        list: A list of tuples, each tuple containing three lists (texts, uuids, embeddings) for a chunk.
+    """
+    # Connect to the SQLite3 database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # SQL statement to join law_entries and embeddings tables and select texts, uuids, and embeddings
+    select_statement = """
+    SELECT le.text, le.uuid, e.embedding
+    FROM law_entries le
+    INNER JOIN embeddings e ON le.uuid = e.law_entry_uuid;
+    """
+    
+    # Execute the SQL statement
+    cursor.execute(select_statement)
+    
+    # Fetch all rows
+    entries = cursor.fetchall()
+    
+    # Close the connection
+    conn.close()
+    
+    # If there are no entries, return an empty list
+    if not entries:
+        return []
+    
+    # Unpack texts, uuids, and embeddings into separate lists
+    texts, uuids, embeddings_list = zip(*[(entry[0], entry[1], numpy.frombuffer(entry[2], dtype=numpy.float32)) for entry in entries])
+    
+    # Initialize lists to hold chunks
+    chunked_texts = [texts[i:i + chunk_size] for i in range(0, len(texts), chunk_size)]
+    chunked_uuids = [uuids[i:i + chunk_size] for i in range(0, len(uuids), chunk_size)]
+    chunked_embeddings = [embeddings_list[i:i + chunk_size] for i in range(0, len(embeddings_list), chunk_size)]
+    
+    # Convert list of embeddings in each chunk to a single NumPy array
+    chunked_embeddings = [numpy.stack(chunk) for chunk in chunked_embeddings]
+    
+    # Zip the chunked lists together to form tuples for each chunk
+    chunked_entries = list(zip(chunked_texts, chunked_uuids, chunked_embeddings))
+    
+    return chunked_entries
+
+def fetch_entries_with_embeddings_specific_chunk(db_path: str, chunk_size: int, chunk_number: int) -> tuple:
+    """
+    Fetch a specific chunk of entries from the law_entries table in the database along with their embeddings,
+    in a memory-efficient manner by only loading the required chunk of data.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        chunk_size (int): The size of each chunk.
+        chunk_number (int): The specific chunk number to return.
+
+    Returns:
+        tuple: A tuple containing three lists (texts, uuids, embeddings) for the specified chunk and the total number of chunks.
+    """
+    # Connect to the SQLite3 database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # First, get the total number of entries to calculate the total number of chunks
+    cursor.execute("SELECT COUNT(*) FROM law_entries")
+    total_entries = cursor.fetchone()[0]
+    total_chunks = (total_entries + chunk_size - 1) // chunk_size
+    
+    # Check if the requested chunk number is within the range of available chunks
+    if chunk_number < 1 or chunk_number > total_chunks:
+        raise ValueError(f"Requested chunk number {chunk_number} is out of range. Total available chunks: {total_chunks}.")
+
+    # Calculate the offset for the SQL query
+    offset = (chunk_number - 1) * chunk_size
+
+    # Modify the SQL query to fetch only the specific chunk of data
+    select_statement = """
+    SELECT le.text, le.uuid, e.embedding
+    FROM law_entries le
+    INNER JOIN embeddings e ON le.uuid = e.law_entry_uuid
+    LIMIT ? OFFSET ?;
+    """
+    
+    # Execute the SQL statement with chunk_size and offset
+    cursor.execute(select_statement, (chunk_size, offset))
+    
+    # Fetch the rows for the specific chunk
+    entries = cursor.fetchall()
+    
+    # Close the connection
+    conn.close()
+    
+    # If there are no entries, return empty lists and 0 as the number of chunks
+    if not entries:
+        return ([], [], []), total_chunks
+    
+    # Unpack texts, uuids, and embeddings into separate lists
+    texts, uuids, embeddings_list = zip(*[(entry[0], entry[1], numpy.frombuffer(entry[2], dtype=numpy.float32)) for entry in entries])
+    
+    # Convert the list of embeddings to a single NumPy array
+    embeddings = numpy.stack(embeddings_list)
+    
+    return (texts, uuids, embeddings), total_chunks
+
 def store_cluster_link_entry(db_path: str, text: str, label_name: str) -> None:
     """
     Store an entry in the cluster_label_link table by finding the corresponding label_uuid and law_entry_uuid.
