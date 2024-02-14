@@ -10,6 +10,8 @@ import nltk
 import torch
 import numpy
 import time
+from bertopic import BERTopic
+from hdbscan import HDBSCAN
 nltk.download('punkt')
 
 def setup_database(db_path: str) -> None:
@@ -521,6 +523,35 @@ def list_models(db_path):
     models = cursor.fetchall()
     conn.close()
     return models
+
+def process_topics(db_path: str):
+    # Step 1: Fetch entries from the database
+    texts, uuids = fetch_entries(db_path)
+
+    # Step 2: Create a BERTopic model and fit it to the texts
+    topic_model = BERTopic()
+    topics, probs = topic_model.fit_transform(texts)
+
+    # Step 3: Insert the topic labels into the database
+    topic_info = topic_model.get_topic_info()
+    topic_names = topic_info['Name'].tolist()
+    for topic_name in topic_names:
+        insert_label(db_path, topic_name)
+
+    # Step 4: Store the cluster link entries in the database
+    document_info = topic_model.get_document_info(texts)
+    documents = document_info['Document'].tolist()
+    names = document_info['Name'].tolist()
+    for doc, name in zip(documents, names):
+        store_cluster_link_entry(db_path, doc, name)
+
+    # # Optional: Use HDBSCAN for clustering with BERTopic
+    # hdbscan_model = HDBSCAN(min_cluster_size=15, metric='euclidean', cluster_selection_method='eom', prediction_data=True)
+    # topic_model_cluster = BERTopic(hdbscan_model=hdbscan_model)
+    # topics_cluster, probs_cluster = topic_model_cluster.fit_transform(texts)
+
+    # # Return the topic model information
+    # return topic_model_cluster.get_topic_info()
 
 def create_parser() -> Callable:
     """
