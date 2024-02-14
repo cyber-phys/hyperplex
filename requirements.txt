@@ -3,3 +3,4 @@ lxml
 markdownify
 sanic
 sanic-ext
+sentence-transformers
