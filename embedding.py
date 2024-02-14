@@ -96,6 +96,77 @@ def fetch_entries_with_user_labels(db_path: str) -> tuple:
 
     return texts_with_labels, labels_list, uuids_with_labels, bert_label_ids_list
 
+def fetch_entries_with_user_labels_and_embeddings_chunk(db_path: str, chunk_size: int, chunk_number: int) -> tuple:
+    """
+    Fetch a specific chunk of entries from the law_entries table in the database along with their user labels, bert_label_ids,
+    and embeddings, in a memory-efficient manner by only loading the required chunk of data.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        chunk_size (int): The size of each chunk.
+        chunk_number (int): The specific chunk number to return.
+
+    Returns:
+        tuple: A tuple containing four lists (texts, user label names or "" if none, uuids of the law entries, 
+               associated bert_label_ids or -1 if none) for the specified chunk, the embeddings for these entries, 
+               and the total number of chunks.
+    """
+    # Connect to the SQLite3 database
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Calculate the total number of entries to determine the total number of chunks
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM law_entries le
+        INNER JOIN user_label_texts ult ON le.uuid = ult.text_uuid
+        INNER JOIN labels l ON ult.label_uuid = l.label_uuid AND l.is_user_label = 1
+        LEFT JOIN embeddings e ON le.uuid = e.law_entry_uuid
+    """)
+    total_entries = cursor.fetchone()[0]
+    total_chunks = (total_entries + chunk_size - 1) // chunk_size
+    
+    # Check if the requested chunk number is within the range of available chunks
+    if chunk_number < 1 or chunk_number > total_chunks:
+        raise ValueError(f"Requested chunk number {chunk_number} is out of range. Total available chunks: {total_chunks}.")
+
+    # Calculate the offset for the SQL query
+    offset = (chunk_number - 1) * chunk_size
+
+    # Modify the SQL query to fetch only the specific chunk of data, including embeddings
+    select_statement = """
+    SELECT le.text, le.uuid, COALESCE(l.label, '') as label, COALESCE(bli.id, -1) as bert_label_id, e.embedding
+    FROM law_entries le
+    LEFT JOIN user_label_texts ult ON le.uuid = ult.text_uuid
+    LEFT JOIN labels l ON ult.label_uuid = l.label_uuid AND l.is_user_label = 1
+    LEFT JOIN bert_label_id bli ON l.label_uuid = bli.label_uuid
+    LEFT JOIN embeddings e ON le.uuid = e.law_entry_uuid
+    GROUP BY le.uuid, l.label
+    ORDER BY le.uuid
+    LIMIT ? OFFSET ?;
+    """
+    
+    # Execute the SQL statement with chunk_size and offset
+    cursor.execute(select_statement, (chunk_size, offset))
+    
+    # Fetch the rows for the specific chunk
+    entries = cursor.fetchall()
+    
+    # Close the connection
+    conn.close()
+    
+    # If there are no entries, return empty lists and 0 as the number of chunks
+    if not entries:
+        return ([], [], [], []), [], total_chunks
+    
+    # Unpack texts, uuids, labels, bert_label_ids, and embeddings into separate lists
+    texts, uuids, labels, bert_label_ids, embeddings_list = zip(*[(entry[0], entry[1], entry[2], entry[3], numpy.frombuffer(entry[4], dtype=numpy.float32) if entry[4] else numpy.array([])) for entry in entries])
+    
+    # Convert the list of embeddings to a single NumPy array if not empty
+    embeddings = numpy.stack(embeddings_list) if embeddings_list[0].size > 0 else numpy.array([])
+    
+    return (texts, labels, uuids, bert_label_ids), embeddings, total_chunks
+
 def fetch_entries(db_path):
     """
     Fetch all entries from the law_entries table in the database.
