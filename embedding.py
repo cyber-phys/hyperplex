@@ -521,7 +521,7 @@ def create_parser() -> Callable:
 if __name__ == "__main__":
     parser = create_parser()
     args = parser.parse_args()
-    db_name = 'law_database_old.db'
+    db_name = 'law_database.db'
 
     if args.command == 'create':
         setup_database(db_name)

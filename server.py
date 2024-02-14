@@ -2,13 +2,13 @@ from sanic import Sanic, response
 from sanic_ext import Extend
 from embedding import perform_search, list_labels
 import sqlite3
-from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations
+from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations, fetch_predicted_chat_links
 
 app = Sanic("LexAid")
-app.config.CORS_ORIGINS = "http://localhost:3001"
+app.config.CORS_ORIGINS = "http://localhost:3000"
 extend = Extend(app)
 
-chat_db_path = 'chat_2.db'
+chat_db_path = 'chat_666.db'
 law_db_path = 'law_database_old.db'
 
 @app.get('/chats')
@@ -38,6 +38,13 @@ async def get_chat_links(request):
     chat_links = fetch_chat_links(conn)
     conn.close()
     return response.json(chat_links)
+
+@app.get('/predicted_links')
+async def get_predict_links(request):
+    conn = connect_db(chat_db_path)
+    predict_links = fetch_predicted_chat_links(conn)
+    conn.close()
+    return response.json(predict_links)
 
 @app.get("/conversations")
 async def conversations_handler(request):

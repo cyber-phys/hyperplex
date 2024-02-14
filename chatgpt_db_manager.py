@@ -6,8 +6,6 @@ import uuid
 from typing import Dict, List, Tuple
 import pandas as pd
 import argparse
-import chatgpt_db_manager as cm
-import argparse
 
 def connect_db(db_file):
     """Attempt to connect to the SQLite database and return the connection object."""
@@ -116,6 +114,16 @@ def create_database(db_file):
                 FOREIGN KEY (parent_topic_id) REFERENCES topics(id),
                 FOREIGN KEY (child_topic_id) REFERENCES topics(id),
                 PRIMARY KEY (parent_topic_id, child_topic_id)
+            );
+        ''')
+
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS predicted_chat_links (
+                source_chat_id TEXT,
+                target_chat_id TEXT,
+                score REAL,
+                FOREIGN KEY (source_chat_id) REFERENCES chats(id),
+                FOREIGN KEY (target_chat_id) REFERENCES chats(id)
             );
         ''', commit=True)
 
@@ -337,20 +345,23 @@ def fetch_topic_links(conn):
 
 def fetch_chat_links(conn):
     """
-    Fetch chat links from the database, including the topic label name for each chat link, and the authors of the source and target chats.
-    Each chat link will also have a UUIDv4 generated as its id.
+    Fetch chat links from the database, including the topic label name for each chat link, the authors of the source and target chats,
+    and the conversation ID of the source chat.
     
     Parameters:
     - conn: The database connection object.
     
     Returns:
-    - A list of dictionaries, each representing a chat link with an additional 'label' field for the topic label name, 'source_author', 'target_author', and a UUIDv4 as 'id'.
+    - A list of dictionaries, each representing a chat link with an additional 'label' field for the topic label name, 'source_author', 
+    'target_author', 'source_conversation_id', and a UUIDv4 as 'id'.
     """
     try:
         cursor = conn.cursor()
         # Modified SQL query to join chat_links with topics to fetch the topic name as label, and also join with chats to get the authors
+        # and include the conversation_id of the source chat
         query = """
-        SELECT cl.source_chat_id, cl.target_chat_id, cl.topic_id, t.name AS label, sc.author AS source_author, tc.author AS target_author
+        SELECT cl.source_chat_id, cl.target_chat_id, cl.topic_id, t.name AS label, sc.author AS source_author, 
+        tc.author AS target_author, sc.conversation_id AS source_conversation_id
         FROM chat_links cl
         JOIN topics t ON cl.topic_id = t.id
         JOIN chats sc ON cl.source_chat_id = sc.id
@@ -368,15 +379,73 @@ def fetch_chat_links(conn):
                 "topic_id": chat_link[2],
                 "label": chat_link[3],
                 "source_author": chat_link[4],
-                "target_author": chat_link[5]
+                "target_author": chat_link[5],
+                "conversation_id": chat_link[6]
             }
             for chat_link in chat_links
         ]
         
         return result
     except Error as e:
-        print(f"Error fetching chat links with topics and authors: {e}")
+        print(f"Error fetching chat links with topics, authors, and conversation IDs: {e}")
         return []
+
+def fetch_predicted_chat_links(conn):
+    """
+    Fetch predicted chat links from the database, including the score for each link.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of dictionaries, each representing a predicted chat link with 'source_chat_id', 'target_chat_id', and 'score'.
+    """
+    try:
+        cursor = conn.cursor()
+        query = """
+        SELECT source_chat_id, target_chat_id, score
+        FROM predicted_chat_links
+        """
+        cursor.execute(query)
+        predicted_links = cursor.fetchall()
+        
+        # Construct the result
+        result = [
+            {
+                "id": str(uuid.uuid4()),
+                "source_chat_id": link[0],
+                "target_chat_id": link[1],
+                "score": link[2]
+            }
+            for link in predicted_links
+        ]
+        
+        return result
+    except Error as e:
+        print(f"Error fetching predicted chat links: {e}")
+        return []
+    
+def fetch_conversation_id_for_chat(conn, chat_id):
+    """
+    Fetch the conversation_id for a given chat_id from the database.
+
+    Parameters:
+    - conn: The database connection object.
+    - chat_id: The ID of the chat.
+
+    Returns:
+    - The conversation_id as a string, or None if not found.
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT conversation_id FROM chats WHERE id = ?", (chat_id,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]
+        return None
+    except Error as e:
+        print(f"Error fetching conversation_id for chat_id {chat_id}: {e}")
+        return None
     
 def fetch_conversations(conn):
     """
@@ -798,9 +867,59 @@ def insert_hierarchical_topics_as_dag(conn, hier_topics: pd.DataFrame):
         print(f"Error inserting hierarchical topics as DAG: {e}")
         conn.rollback()
 
+def find_small_disjointed_conversation_links(conn):
+    """
+    Find all possible, but not valid, links between messages across disjointed conversations,
+    considering only chats that are either the start of a chat or have no children.
+    
+    Parameters:
+    - conn: The database connection object.
+    
+    Returns:
+    - A list of RDF triples as strings, formatted as source_chat_id, source_author_to_target_author, target_chat_id.
+    """
+    try:
+        c = conn.cursor()
+        # Fetch chats that are the start of a conversation
+        c.execute("SELECT id, conversation_id, author FROM chats WHERE is_first_message = 1")
+        start_chats = c.fetchall()
+
+        # Fetch chats that have no children
+        c.execute("""
+            SELECT c.id, c.conversation_id, c.author 
+            FROM chats c
+            LEFT JOIN chat_links cl ON c.id = cl.source_chat_id
+            WHERE cl.source_chat_id IS NULL
+        """)
+        leaf_chats = c.fetchall()
+
+        # Combine and deduplicate chats
+        all_chats = list(set(start_chats + leaf_chats))
+
+        # Group chats by conversation_id
+        grouped_chats = {}
+        for chat_id, conversation_id, author in all_chats:
+            grouped_chats.setdefault(conversation_id, []).append((chat_id, author))
+
+        # Generate all possible pairs of chats that are in different conversations
+        rdf_triples = []
+        for conv_id_1, chats_1 in grouped_chats.items():
+            for conv_id_2, chats_2 in grouped_chats.items():
+                if conv_id_1 != conv_id_2:
+                    for chat1_id, chat1_author in chats_1:
+                        for chat2_id, chat2_author in chats_2:
+                            rdf_triple = f"{chat1_id} {chat1_author}_to_{chat2_author} {chat2_id}"
+                            rdf_triples.append(rdf_triple)
+
+        return rdf_triples
+    except Error as e:
+        print(f"Error finding disjoint conversation links: {e}")
+        return []
+
 def find_disjoint_conversation_links(conn):
     """
-    Find all possible, but not valid, links between messages across disjointed conversations.
+    Find all possible, but not valid, links between messages across disjointed conversations,
+    excluding links between chats with the same author.
     
     Parameters:
     - conn: The database connection object.
@@ -814,17 +933,24 @@ def find_disjoint_conversation_links(conn):
         c.execute("SELECT id, conversation_id, author FROM chats")
         chats = c.fetchall()
 
-        # Generate all possible pairs of chats that are in different conversations
-        disjoint_pairs = [
-            (chat1, chat2) for chat1 in chats for chat2 in chats
-            if chat1[1] != chat2[1]
-        ]
+        # Group chats by conversation_id
+        grouped_chats = {}
+        for chat in chats:
+            chat_id, conversation_id, author = chat
+            if conversation_id not in grouped_chats:
+                grouped_chats[conversation_id] = []
+            grouped_chats[conversation_id].append((chat_id, author))
 
-        # Format the pairs into RDF triples
-        rdf_triples = [
-            f"{pair[0][0]} {pair[0][2]}_to_{pair[1][2]} {pair[1][0]}"
-            for pair in disjoint_pairs
-        ]
+        # Generate all possible pairs of chats that are in different conversations and have different authors
+        rdf_triples = []
+        conversation_ids = list(grouped_chats.keys())
+        for i, conv_id_1 in enumerate(conversation_ids):
+            for conv_id_2 in conversation_ids[i+1:]:
+                for chat1 in grouped_chats[conv_id_1]:
+                    for chat2 in grouped_chats[conv_id_2]:
+                        if chat1[1] != chat2[1]:  # Check if authors are different
+                            rdf_triple = f"{chat1[0]} {chat1[1]}_to_{chat2[1]} {chat2[0]}"
+                            rdf_triples.append(rdf_triple)
 
         return rdf_triples
     except Error as e:
@@ -864,6 +990,69 @@ def generate_rdf_triples(conn):
 
     return rdf_triples
 
+def insert_predicted_chat_links(conn, rdf_triples_with_scores):
+    # Clear the existing data
+    execute_sql(conn, "DELETE FROM predicted_chat_links", commit=True)
+    
+    # Insert new data
+    insert_sql = '''
+        INSERT INTO predicted_chat_links (source_chat_id, target_chat_id, score)
+        VALUES (?, ?, ?);
+    '''
+    for triple in rdf_triples_with_scores:
+        source_chat_id, label, target_chat_id, score = triple  # Directly unpack the tuple
+        execute_sql(conn, insert_sql, (source_chat_id, target_chat_id, float(score)), commit=True)
+
+    print("Predicted chat links updated successfully.")
+
+def find_disjoint_conversation_links_for_specific_conv(conn, specific_conv_id):
+    """
+    Find all possible, but not valid, links between messages of a specific conversation
+    and messages across all other disjointed conversations, excluding links between chats
+    with the same author.
+    
+    Parameters:
+    - conn: The database connection object.
+    - specific_conv_id: The ID of the specific conversation to compare against all others.
+    
+    Returns:
+    - A list of RDF triples as strings, formatted as source_chat_id, source_author_to_target_author, target_chat_id.
+    """
+    try:
+        c = conn.cursor()
+        # Fetch all chats with their conversation_id and author
+        c.execute("SELECT id, conversation_id, author FROM chats")
+        chats = c.fetchall()
+
+        # Group chats by conversation_id
+        grouped_chats = {}
+        for chat in chats:
+            chat_id, conversation_id, author = chat
+            grouped_chats.setdefault(conversation_id, []).append((chat_id, author))
+
+        # Ensure the specific conversation exists
+        if specific_conv_id not in grouped_chats:
+            print(f"No conversation found with ID: {specific_conv_id}")
+            return []
+
+        # Extract chats for the specific conversation
+        specific_conv_chats = grouped_chats[specific_conv_id]
+
+        # Generate all possible pairs of chats that are in different conversations and have different authors
+        rdf_triples = []
+        for conv_id, chats in grouped_chats.items():
+            if conv_id != specific_conv_id:  # Exclude the specific conversation itself
+                for chat1 in specific_conv_chats:
+                    for chat2 in chats:
+                        if chat1[1] != chat2[1]:  # Check if authors are different
+                            rdf_triple = f"{chat1[0]} {chat1[1]}_to_{chat2[1]} {chat2[0]}"
+                            rdf_triples.append(rdf_triple)
+
+        return rdf_triples
+    except Error as e:
+        print(f"Error finding disjoint conversation links for specific conversation {specific_conv_id}: {e}")
+        return []
+
 def generate_rdf_subcommand(args):
     conn = connect_db(args.db_file)
     if conn is not None:
@@ -894,9 +1083,59 @@ def find_disjoint_subcommand(args):
     else:
         print("Failed to connect to the database.")
 
+def insert_predicted_links_subcommand(args):
+    conn = connect_db(args.db_file)
+    if conn is not None:
+        # Read the predicted links from the text file
+        with open(args.links_file, 'r') as file:
+            lines = file.readlines()
+            # Parse the space-delimited data
+            rdf_triples_with_scores = [line.strip().split() for line in lines]
+            print(rdf_triples_with_scores)
+            # Call the insert function
+            insert_predicted_chat_links(conn, rdf_triples_with_scores)
+        print("Predicted chat links inserted successfully.")
+    else:
+        print("Failed to connect to the database.")
+
+def fetch_conversation_id_subcommand(args):
+    conn = connect_db(args.db_file)
+    if conn is not None:
+        conversation_id = fetch_conversation_id_for_chat(conn, args.chat_id)
+        if conversation_id:
+            print(f"Conversation ID for chat ID {args.chat_id}: {conversation_id}")
+        else:
+            print(f"No conversation found for chat ID {args.chat_id}")
+    else:
+        print("Failed to connect to the database.")
+
+def find_disjoint_conversation_links_for_specific_conv_subcommand(args):
+    conn = connect_db(args.db_file)
+    if conn is not None:
+        rdf_triples = find_disjoint_conversation_links_for_specific_conv(conn, args.specific_conv_id)
+        if args.output:
+            with open(args.output, "w") as file:
+                for triple in rdf_triples:
+                    file.write(triple + "\n")
+            print(f"Disjoint conversation links for specific conversation have been written to {args.output}")
+        else:
+            for triple in rdf_triples[:5]:  # Print the first 5 triples for demonstration
+                print(triple)
+    else:
+        print("Failed to connect to the database.")
+
+def create_database_subcommand(args):
+    """CLI command to create the database."""
+    create_database(args.db_file)
+    print(f"Database created at {args.db_file}")
+
 def main():
     parser = argparse.ArgumentParser(description="Chat database management and RDF triple generation.")
     subparsers = parser.add_subparsers(help='commands')
+
+    create_db_parser = subparsers.add_parser('create_db', help='Create the database and tables.')
+    create_db_parser.add_argument('db_file', type=str, help='Path to the SQLite database file.')
+    create_db_parser.set_defaults(func=create_database_subcommand)
 
     # Generate RDF triples command
     rdf_parser = subparsers.add_parser('generate_rdf', help='Generate RDF triples from chat database.')
@@ -905,10 +1144,26 @@ def main():
     rdf_parser.set_defaults(func=generate_rdf_subcommand)
 
     # Find disjoint conversation links command
-    disjoint_parser = subparsers.add_parser('find_disjoint', help='Find disjoint conversation links and output RDF triples.')
+    disjoint_parser = subparsers.add_parser('possible_links', help='Find disjoint conversation links and output RDF triples.')
     disjoint_parser.add_argument("db_file", help="Path to the SQLite database file.")
     disjoint_parser.add_argument("-o", "--output", help="Path to the output file for RDF triples.", default=None)
     disjoint_parser.set_defaults(func=find_disjoint_subcommand)
+
+    insert_links_parser = subparsers.add_parser('insert_predicted_links', help='Insert predicted chat links into the database.')
+    insert_links_parser.add_argument("db_file", help="Path to the SQLite database file.")
+    insert_links_parser.add_argument("links_file", help="Path to the text file containing predicted links.")
+    insert_links_parser.set_defaults(func=insert_predicted_links_subcommand)
+
+    fetch_conversation_id_parser = subparsers.add_parser('fetch_conversation_id', help='Fetch the conversation_id for a given chat_id.')
+    fetch_conversation_id_parser.add_argument("db_file", help="Path to the SQLite database file.")
+    fetch_conversation_id_parser.add_argument("chat_id", help="The chat_id to fetch the conversation_id for.")
+    fetch_conversation_id_parser.set_defaults(func=fetch_conversation_id_subcommand)
+
+    specific_links_parser = subparsers.add_parser('find_specific_links', help='Find disjoint conversation links for a specific conversation.')
+    specific_links_parser.add_argument("db_file", help="Path to the SQLite database file.")
+    specific_links_parser.add_argument("specific_conv_id", help="The specific conversation ID to compare against all others.")
+    specific_links_parser.add_argument("-o", "--output", help="Path to the output file for RDF triples.", default=None)
+    specific_links_parser.set_defaults(func=find_disjoint_conversation_links_for_specific_conv_subcommand)
 
     args = parser.parse_args()
     if hasattr(args, 'func'):
