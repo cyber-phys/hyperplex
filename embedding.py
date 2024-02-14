@@ -85,6 +85,27 @@ def setup_database(db_path: str) -> None:
         );
     """)
 
+    # Create user_labels table if it does not exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_labels (
+            label_uuid TEXT PRIMARY KEY,
+            label TEXT NOT NULL UNIQUE
+        );
+    """)
+
+    # Create user_label_texts table if it does not exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_label_texts (
+            label_uuid TEXT NOT NULL,
+            text_uuid TEXT NOT NULL,
+            creation_time TEXT NOT NULL,
+            char_start INTEGER NOT NULL,
+            char_end INTEGER NOT NULL,
+            FOREIGN KEY(label_uuid) REFERENCES user_labels(label_uuid),
+            FOREIGN KEY(text_uuid) REFERENCES law_entries(uuid)
+        );
+    """)
+
     conn.commit()
     conn.close()
 
@@ -209,6 +230,40 @@ def cluster_entries(db_path: str, model_name: str, min_community_size: int = 25,
             print("\tUUID: ", law_entry_uuids[entry_id])
     
     return
+
+def insert_user_label_text(db_path: str, label_name: str, text_uuid: str, char_start: int, char_end: int) -> None:
+    """
+    Insert a new label text for a user label. If the label does not exist, create a new one.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        label_name (str): The name of the label.
+        text_uuid (str): The UUID of the text to label.
+        char_start (int): The starting character position of the label in the text.
+        char_end (int): The ending character position of the label in the text.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Find or create the label_uuid for the given label_name
+    cursor.execute("SELECT label_uuid FROM user_labels WHERE label = ?", (label_name,))
+    label_result = cursor.fetchone()
+
+    if label_result:
+        label_uuid = label_result[0]
+    else:
+        # If the label does not exist, create a new one
+        label_uuid = str(uuid4())
+        cursor.execute("INSERT INTO user_labels (label_uuid, label) VALUES (?, ?)", (label_uuid, label_name))
+    
+    # Insert the new label text into user_label_texts table
+    cursor.execute("""
+        INSERT INTO user_label_texts (label_uuid, text_uuid, creation_time, char_start, char_end)
+        VALUES (?, ?, datetime('now'), ?, ?)
+    """, (label_uuid, text_uuid, char_start, char_end))
+
+    conn.commit()
+    conn.close()
 
 def insert_label(db_path, label_text, color='blue'):
     """

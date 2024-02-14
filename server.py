@@ -1,6 +1,6 @@
 from sanic import Sanic, response
 from sanic_ext import Extend
-from embedding import perform_search, list_labels
+from embedding import perform_search, list_labels, insert_user_label_text
 import sqlite3
 from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations, fetch_predicted_chat_links
 
@@ -27,7 +27,7 @@ async def get_topics(request):
 
 @app.get('/chat_topics')
 async def get_chat_topics(request):
-    conn = connect_db(chat_db_path)
+    conn = connect_db(chat_db_path)ß
     chat_topics = fetch_chat_topics(conn)
     conn.close()
     return response.json(chat_topics)
@@ -56,6 +56,60 @@ async def conversations_handler(request):
     conversations = fetch_conversations(conn)
     conn.close()
     return response.json(conversations)
+
+@app.post("/add_user_label")
+async def add_user_label(request):
+    """
+    Add a user label to the database.
+    ---
+    operationId: addUserLabel
+    tags:
+      - labels
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              label_name:
+                type: string
+                description: The name of the label to add.
+              text_uuid:
+                type: string
+                description: The UUID of the text to label.
+              char_start:
+                type: integer
+                description: The starting character position of the label in the text.
+              char_end:
+                type: integer
+                description: The ending character position of the label in the text.
+    responses:
+      '200':
+        description: Confirmation that the label has been added.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  description: True if the label was successfully added, false otherwise.
+                message:
+                  type: string
+                  description: A message detailing the result of the operation.
+    """
+    body = request.json
+    label_name = body.get("label_name", "")
+    text_uuid = body.get("text_uuid", "")
+    char_start = body.get("char_start", 0)
+    char_end = body.get("char_end", 0)
+
+    try:
+        insert_user_label_text(law_db_path, label_name, text_uuid, char_start, char_end)
+        return response.json({"success": True, "message": "Label added successfully."})
+    except Exception as e:
+        return response.json({"success": False, "message": str(e)})
 
 @app.get("/labels")
 async def labels_handler(request):
