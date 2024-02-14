@@ -47,6 +47,16 @@ def create_database(db_file):
                 url TEXT
         ''')
 
+        # PDF Entries Table
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS pdf_entries (
+                uuid TEXT PRIMARY KEY,
+                title TEXT,
+                text TEXT,
+                type TEXT,
+                url TEXT
+        ''')
+
         # Table which holds list of NLP embedding models
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS nlp_model (
