@@ -32,7 +32,7 @@ def execute_sql(conn, sql, params=None, commit=False):
             print("Failed parameters:", params)
 
 def create_database(db_file):
-    """Create a SQLite database and tables for conversations, chats, and topics."""
+    """Create a SQLite database and tables for conversations, chats, embeddings, laws, pdfs and topics"""
     conn = connect_db(db_file)
     if conn is not None:
 
@@ -45,6 +45,88 @@ def create_database(db_file):
                 text TEXT,
                 amended TEXT,
                 url TEXT
+        ''')
+
+        # Table which holds list of NLP embedding models
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS nlp_model (
+                uuid TEXT PRIMARY KEY,
+                model TEXT NOT NULL,
+                label TEXT NOT NULL UNIQUE,
+                chunking_method TEXT CHECK(chunking_method IN ('sentence', 'word', 'char')) NOT NULL,
+                chunking_size INTEGER NOT NULL
+            );
+        ''')
+
+        #TODO make this work with chats and pdfs
+        # Table for embeddings 
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS embeddings (
+                model_uuid TEXT NOT NULL,
+                law_entry_uuid TEXT NOT NULL,
+                creation_time TEXT NOT NULL,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid),
+                FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid)
+            );
+        ''')
+
+        #TODO make general and merge with topics
+        # Table for BERTopic labels
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS labels (
+                label_uuid TEXT UNIQUE,
+                label TEXT NOT NULL UNIQUE,
+                creation_time TEXT NOT NULL,
+                color TEXT DEFAULT 'blue',
+                is_user_label BOOLEAN NOT NULL DEFAULT 0,
+                bert_id INTEGER PRIMARY KEY AUTOINCREMENT
+            );
+        ''')
+
+        #TODO: make general and merge with pdf and chats
+        # Table that links law entries to labels
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS cluster_label_link (
+                label_uuid TEXT NOT NULL,
+                law_entry_uuid TEXT NOT NULL,
+                creation_time TEXT NOT NULL,
+                FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
+                FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid)
+            );
+        ''')
+
+        #TODO: make general and merge with pdf and chats
+        # Table that links law embeddings to a label
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS label_embeddings (
+                label_uuid TEXT NOT NULL,
+                law_entry_uuid TEXT NOT NULL,
+                creation_time TEXT NOT NULL,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                model_uuid TEXT NOT NULL,
+                FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
+                FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid),
+                FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid)
+            );
+        ''')
+
+        #TODO: make general for use with pdfs and chats
+        # Table that links user labels to specific laws + label meta data
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS user_label_texts (
+                label_uuid TEXT NOT NULL,
+                text_uuid TEXT NOT NULL,
+                creation_time TEXT NOT NULL,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
+                FOREIGN KEY(text_uuid) REFERENCES law_entries(uuid)
+            );
         ''')
 
         # Conversations table

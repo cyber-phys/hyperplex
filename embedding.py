@@ -12,97 +12,8 @@ import numpy
 import time
 from bertopic import BERTopic
 from hdbscan import HDBSCAN
+from db import connect_db, execute_sql, create_database
 nltk.download('punkt')
-
-def setup_database(db_path: str) -> None:
-    """
-    Set up the SQLite database and create tables if they do not exist.
-
-    Args:
-        db_path (str): The file path to the SQLite database.
-    """
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    # Create nlp_model table if it does not exist
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS nlp_model (
-            uuid TEXT PRIMARY KEY,
-            model TEXT NOT NULL,
-            label TEXT NOT NULL UNIQUE,
-            chunking_method TEXT CHECK(chunking_method IN ('sentence', 'word', 'char')) NOT NULL,
-            chunking_size INTEGER NOT NULL
-        );
-    """)
-
-    # Create embeddings table if it does not exist
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS embeddings (
-            model_uuid TEXT NOT NULL,
-            law_entry_uuid TEXT NOT NULL,
-            creation_time TEXT NOT NULL,
-            char_start INTEGER NOT NULL,
-            char_end INTEGER NOT NULL,
-            embedding BLOB NOT NULL,
-            FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid),
-            FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid)
-        );
-    """)
-
-    # SQL statement to create the labels table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS labels (
-            label_uuid TEXT UNIQUE,
-            label TEXT NOT NULL UNIQUE,
-            creation_time TEXT NOT NULL,
-            color TEXT DEFAULT 'blue',
-            is_user_label BOOLEAN NOT NULL DEFAULT 0,
-            bert_id INTEGER PRIMARY KEY AUTOINCREMENT
-        );
-    """)
-
-    # SQL statement to create the label_embeddings table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cluster_label_link (
-            label_uuid TEXT NOT NULL,
-            law_entry_uuid TEXT NOT NULL,
-            creation_time TEXT NOT NULL,
-            FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
-            FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid)
-        );
-    """)
-
-    # SQL statement to create the label_embeddings table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS label_embeddings (
-            label_uuid TEXT NOT NULL,
-            law_entry_uuid TEXT NOT NULL,
-            creation_time TEXT NOT NULL,
-            char_start INTEGER NOT NULL,
-            char_end INTEGER NOT NULL,
-            embedding BLOB NOT NULL,
-            model_uuid TEXT NOT NULL,
-            FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
-            FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid),
-            FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid)
-        );
-    """)
-
-    # Create user_label_texts table if it does not exist
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_label_texts (
-            label_uuid TEXT NOT NULL,
-            text_uuid TEXT NOT NULL,
-            creation_time TEXT NOT NULL,
-            char_start INTEGER NOT NULL,
-            char_end INTEGER NOT NULL,
-            FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
-            FOREIGN KEY(text_uuid) REFERENCES law_entries(uuid)
-        );
-    """)
-
-    conn.commit()
-    conn.close()
 
 def get_user_labels(db_path: str) -> list:
     """
@@ -755,7 +666,7 @@ if __name__ == "__main__":
     db_name = 'law_database.db'
 
     if args.command == 'create':
-        setup_database(db_name)
+        create_database(db_name)
         # Validate chunking size if provided
         if args.chunk_size is not None and args.chunk_size <= 0:
             parser.error("Chunking size must be a non-zero integer")
@@ -766,7 +677,7 @@ if __name__ == "__main__":
         print_similar_entries(db_name, similar_entries)
     
     elif args.command == 'init-db':
-        setup_database(args.db_name)
+        create_database(args.db_name)
         print(f"Database '{args.db_name}' initialized successfully.")
     
     elif args.command == 'create-label':
