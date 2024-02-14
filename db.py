@@ -45,6 +45,7 @@ def create_database(db_file):
                 text TEXT,
                 amended TEXT,
                 url TEXT
+            );
         ''')
 
         # PDF Entries Table
@@ -55,6 +56,7 @@ def create_database(db_file):
                 text TEXT,
                 type TEXT,
                 url TEXT
+            );
         ''')
 
         # Table which holds list of NLP embedding models
@@ -93,6 +95,18 @@ def create_database(db_file):
                 color TEXT DEFAULT 'blue',
                 is_user_label BOOLEAN NOT NULL DEFAULT 0,
                 bert_id INTEGER PRIMARY KEY AUTOINCREMENT
+            );
+        ''')
+
+        # Topics table
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS topics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                description TEXT,
+                gnn_label TEXT,
+                color TEXT DEFAULT 'blue',
+                is_user_topic BOOLEAN NOT NULL DEFAULT 0
             );
         ''')
 
@@ -165,16 +179,6 @@ def create_database(db_file):
                 parent TEXT,
                 is_first_message BOOLEAN,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id)
-            );
-        ''')
-
-        # Topics table
-        execute_sql(conn, '''
-            CREATE TABLE IF NOT EXISTS topics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                description TEXT,
-                gnn_label TEXT
             );
         ''')
 
