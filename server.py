@@ -5,7 +5,7 @@ import sqlite3
 from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations, fetch_predicted_chat_links
 
 app = Sanic("LexAid")
-app.config.CORS_ORIGINS = "https://luc-g7-7500.taildd8a6.ts.net"
+app.config.CORS_ORIGINS = ["https://luc-g7-7500.taildd8a6.ts.net", "http://localhost:3000"]
 extend = Extend(app)
 
 chat_db_path = 'chat_666.db'
