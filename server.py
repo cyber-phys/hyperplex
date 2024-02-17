@@ -1,6 +1,6 @@
 from sanic import Sanic, response
 from sanic_ext import Extend
-from embedding import perform_search, list_labels, insert_user_label_text, process_topics, process_topics_with_user_labels, get_user_labels
+from embedding import perform_search, list_labels, insert_user_label_text, get_user_labels
 import sqlite3
 from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations, fetch_predicted_chat_links
 
@@ -8,7 +8,7 @@ app = Sanic("LexAid")
 app.config.CORS_ORIGINS = ["https://luc-g7-7500.taildd8a6.ts.net", "http://localhost:3000"]
 extend = Extend(app)
 
-chat_db_path = 'chat_666.db'
+chat_db_path = 'chat.db'
 law_db_path = 'law_database.db'
 
 @app.get('/chats')
@@ -132,72 +132,73 @@ async def add_user_label(request):
         print("Added label")
         return response.json({"success": True, "message": "Label added successfully."})
     except Exception as e:
+        print(e)
         return response.json({"success": False, "message": str(e)})
   
-@app.post("/process_topics")
-async def process_topics_handler(request):
-    """
-    Process topics by creating a BERTopic model, fitting it to the texts,
-    inserting topic labels into the database, and storing cluster link entries.
-    ---
-    operationId: processTopics
-    tags:
-      - topics
-    responses:
-      '200':
-        description: Success message after processing topics.
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                success:
-                  type: boolean
-                  description: True if the topics were processed successfully, false otherwise.
-                message:
-                  type: string
-                  description: A message detailing the result of the operation.
-    """
-    try:
-        # Assuming process_topics is a function defined in the embedding module
-        # and it performs all the steps as required.
-        process_topics(law_db_path)
-        return response.json({"success": True, "message": "Topics processed successfully."})
-    except Exception as e:
-        return response.json({"success": False, "message": str(e)})
+# @app.post("/process_topics")
+# async def process_topics_handler(request):
+#     """
+#     Process topics by creating a BERTopic model, fitting it to the texts,
+#     inserting topic labels into the database, and storing cluster link entries.
+#     ---
+#     operationId: processTopics
+#     tags:
+#       - topics
+#     responses:
+#       '200':
+#         description: Success message after processing topics.
+#         content:
+#           application/json:
+#             schema:
+#               type: object
+#               properties:
+#                 success:
+#                   type: boolean
+#                   description: True if the topics were processed successfully, false otherwise.
+#                 message:
+#                   type: string
+#                   description: A message detailing the result of the operation.
+#     """
+#     try:
+#         # Assuming process_topics is a function defined in the embedding module
+#         # and it performs all the steps as required.
+#         process_topics(law_db_path)
+#         return response.json({"success": True, "message": "Topics processed successfully."})
+#     except Exception as e:
+#         return response.json({"success": False, "message": str(e)})
     
-@app.post("/process_topics_with_user_labels")
-async def process_topics_with_user_labels_handler(request):
-    """
-    Process topics and user labels by creating a BERTopic model, fitting it to the texts,
-    inserting topic labels and user labels into the database, and storing cluster link entries.
-    ---
-    operationId: processTopicsWithUserLabels
-    tags:
-      - topics
-      - labels
-    responses:
-      '200':
-        description: Success message after processing topics and user labels.
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                success:
-                  type: boolean
-                  description: True if the topics and user labels were processed successfully, false otherwise.
-                message:
-                  type: string
-                  description: A message detailing the result of the operation.
-    """
-    try:
-        # This function should be defined in the embedding module and should
-        # include the logic for processing user labels along with topics.
-        process_topics_with_user_labels(law_db_path)
-        return response.json({"success": True, "message": "Topics and user labels processed successfully."})
-    except Exception as e:
-        return response.json({"success": False, "message": str(e)})
+# @app.post("/process_topics_with_user_labels")
+# async def process_topics_with_user_labels_handler(request):
+#     """
+#     Process topics and user labels by creating a BERTopic model, fitting it to the texts,
+#     inserting topic labels and user labels into the database, and storing cluster link entries.
+#     ---
+#     operationId: processTopicsWithUserLabels
+#     tags:
+#       - topics
+#       - labels
+#     responses:
+#       '200':
+#         description: Success message after processing topics and user labels.
+#         content:
+#           application/json:
+#             schema:
+#               type: object
+#               properties:
+#                 success:
+#                   type: boolean
+#                   description: True if the topics and user labels were processed successfully, false otherwise.
+#                 message:
+#                   type: string
+#                   description: A message detailing the result of the operation.
+#     """
+#     try:
+#         # This function should be defined in the embedding module and should
+#         # include the logic for processing user labels along with topics.
+#         process_topics_with_user_labels(law_db_path)
+#         return response.json({"success": True, "message": "Topics and user labels processed successfully."})
+#     except Exception as e:
+#         return response.json({"success": False, "message": str(e)})
 
 @app.get("/labels")
 async def labels_handler(request):
