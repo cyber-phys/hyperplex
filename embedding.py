@@ -714,7 +714,8 @@ def search_embeddings_by_similarity(conn, query_embedding: torch.Tensor, similar
         label (str, optional): The label to filter the search by. Defaults to None.
 
     Returns:
-        list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores above the threshold.
+        list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores above the threshold,
+              sorted by similarity score in descending order.
     """
     cursor = conn.cursor()
     # If a label is provided, first find the corresponding label_uuid
@@ -752,13 +753,11 @@ def search_embeddings_by_similarity(conn, query_embedding: torch.Tensor, similar
 
     corpus_embeddings_tensor = torch.stack(corpus_embeddings)
     cos_scores = util.cos_sim(query_embedding, corpus_embeddings_tensor)[0]
-    # print(cos_scores)
 
-    # Filter results by similarity threshold
-    similar_entries = []
-    for idx, score in enumerate(cos_scores):
-        if score.item() >= similarity_threshold:
-            similar_entries.append((law_entry_uuids[idx], score.item(), char_starts[idx], char_ends[idx]))
+    # Filter results by similarity threshold and sort by score
+    similar_entries = [(law_entry_uuids[idx], score.item(), char_starts[idx], char_ends[idx])
+                       for idx, score in enumerate(cos_scores) if score.item() >= similarity_threshold]
+    similar_entries.sort(key=lambda x: x[1], reverse=True)  # Sort by similarity score in descending order
 
     return similar_entries
 
