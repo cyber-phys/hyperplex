@@ -702,6 +702,66 @@ def compute_query_embedding(model_name: str, query: str) -> torch.Tensor:
     query_embedding = model.encode(query, convert_to_tensor=True)
     return query_embedding
 
+def search_embeddings_by_similarity(conn, query_embedding: torch.Tensor, similarity_threshold: float = 0.75, label: str = None):
+    """
+    Search the embeddings table for entries that are more similar to the query embedding than the specified threshold.
+    Optionally filter the search to only include entries linked to a specific label.
+
+    Args:
+        conn: The database connection object.
+        query_embedding (torch.Tensor): The query embedding tensor.
+        similarity_threshold (float, optional): The similarity threshold to filter entries. Defaults to 0.75.
+        label (str, optional): The label to filter the search by. Defaults to None.
+
+    Returns:
+        list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores above the threshold.
+    """
+    cursor = conn.cursor()
+    # If a label is provided, first find the corresponding label_uuid
+    label_uuid = None
+    if label:
+        cursor.execute("SELECT label_uuid FROM labels WHERE label = ?", (label,))
+        label_row = cursor.fetchone()
+        if label_row:
+            label_uuid = label_row[0]
+        else:
+            print(f"No label found with text '{label}'.")
+            return []
+
+    # Modify the query based on whether a label_uuid has been found
+    if label_uuid:
+        cursor.execute("""
+            SELECT e.law_entry_uuid, e.embedding, e.char_start, e.char_end
+            FROM embeddings e
+            INNER JOIN cluster_label_link cll ON e.law_entry_uuid = cll.law_entry_uuid
+            WHERE cll.label_uuid = ?
+        """, (label_uuid,))
+    else:
+        cursor.execute("SELECT law_entry_uuid, embedding, char_start, char_end FROM embeddings")
+
+    corpus_embeddings = []
+    law_entry_uuids = []
+    char_starts = []
+    char_ends = []
+    for law_entry_uuid, embedding_blob, char_start, char_end in cursor.fetchall():
+        embedding = torch.Tensor(numpy.frombuffer(embedding_blob, dtype=numpy.float32))
+        corpus_embeddings.append(embedding)
+        law_entry_uuids.append(law_entry_uuid)
+        char_starts.append(char_start)
+        char_ends.append(char_end)
+
+    corpus_embeddings_tensor = torch.stack(corpus_embeddings)
+    cos_scores = util.cos_sim(query_embedding, corpus_embeddings_tensor)[0]
+    # print(cos_scores)
+
+    # Filter results by similarity threshold
+    similar_entries = []
+    for idx, score in enumerate(cos_scores):
+        if score.item() >= similarity_threshold:
+            similar_entries.append((law_entry_uuids[idx], score.item(), char_starts[idx], char_ends[idx]))
+
+    return similar_entries
+
 def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5, label: str = None):
     """
     Search the embeddings table for the top-k most similar entries to the query embedding.
@@ -777,6 +837,27 @@ def print_similar_entries(db_path: str, similar_entries):
             print(f"{text} (Score: {score:.4f}, Start: {char_start}, End: {char_end})")
     finally:
         conn.close()
+
+def perform_search_by_similarity(db_path: str, model_name: str, query: str, percent: int = 50, label: str = None) -> list:
+    """
+    Perform a search over the embeddings table using cosine similarity and return the similar entries.
+
+    Args:
+        db_path (str): The path to the SQLite database.
+        model_name (str): The name of the model to use for computing the query embedding.
+        query (str): The query string to search for.
+        top_k (int): The number of top similar entries to return.
+
+    Returns:
+        list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores.
+    """
+    conn = sqlite3.connect(db_path)
+    scaled_percent = percent / 100.00
+    query_embedding = compute_query_embedding(model_name, query)
+    similar_entries = search_embeddings_by_similarity(conn, query_embedding, scaled_percent, label)
+    print(similar_entries)
+    conn.close()
+    return similar_entries
 
 def perform_search(db_path: str, model_name: str, query: str, top_k: int = 5, label: str = None) -> list:
     """
