@@ -52,8 +52,8 @@ class SeleniumScraper:
         self.visited_links = set()
         self.law_section_links = set()
         self.processed_manylaw_links = set()
-        self.executor = ThreadPoolExecutor(max_workers=50)
-        self.manylaw_executor = ThreadPoolExecutor(max_workers=5)
+        self.executor = ThreadPoolExecutor(max_workers=20)
+        self.manylaw_executor = ThreadPoolExecutor(max_workers=10)
         self.stop_event = threading.Event()
         self.driver_pool = WebDriverPool(max_size=100)
         self.db_file = db_file
@@ -66,47 +66,90 @@ class SeleniumScraper:
         self.executor.shutdown(wait=False)
         self.driver_pool.quit_all_drivers()
 
-    def insert_law_entry(self, db_file, code, section, text, amended, url):
+    def insert_law_entry(self, db_file, result):
         """
-        Inserts a new law entry into the law_entries table in the SQLite database if an entry with the same text does not already exist.
-        If a duplicate text entry is found, prints an error message instead of inserting.
+        Inserts a new law entry into the law_entries table in the SQLite database.
+        The result parameter is a dictionary containing all the necessary fields.
 
         Parameters:
-        - db_path (str): The file path to the SQLite database.
-        - code (str): The code name associated with the law entry.
-        - section (str): The section number of the law entry.
-        - text (str): The text content of the law entry, converted to Markdown format.
-        - amended (str): Information about when the law was last amended.
-        - url (str): The URL to the original law entry source.
+        - db_file (str): The file path to the SQLite database.
+        - result (dict): A dictionary containing all the fields for the law entry.
         """
-        # Connect to the SQLite3 database using the connect_db function
         try:
             conn = db.connect_db(db_file)
             
             if conn is not None:
-                # Check for existing entry with the same text
-                check_sql = "SELECT EXISTS(SELECT 1 FROM law_entries WHERE text = ? LIMIT 1)"
-                exists = db.execute_sql(conn, check_sql, (text,), fetchone=True)[0]
+                # Check if the entry already exists based on the URL
+                check_sql = "SELECT url, text FROM law_entries WHERE url = ? AND text = ? LIMIT 1"
+                existing_entry = db.execute_sql(conn, check_sql, (result['URL'], result['Law']), fetchone=True)
                 
-                if exists:
-                    print(f"\nError: Duplicate entry with text '{text[:30]}...\nDuplicate URL: {url}' found. Skipping insertion.")
+                if existing_entry:
+                    existing_url, existing_text = existing_entry
+                    print(f"\nError: Duplicate entry with text '{result['Law'][:30]}...'\nCurrent URL: {result['URL']}\nDB Match URL: {existing_url}\n")
                 else:
                     # Generate a unique UUID for the new entry
                     entry_uuid = str(uuid.uuid4())
                     
                     # SQL statement to insert a new row
                     insert_row_sql = """
-                    INSERT INTO law_entries (uuid, code, section, text, amended, url)
-                    VALUES (?, ?, ?, ?, ?, ?);
+                    INSERT INTO law_entries (uuid, code, title, title_italic, division, division_italic, part, part_italic, chapter, chapter_italic, article, article_italic, section, section_italic, text, text_italic, url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """
                     
+                    # Prepare the data tuple from the result dictionary
+                    data_tuple = (
+                        entry_uuid,
+                        result['Code'],
+                        result['Title'],
+                        result['Title_italic'],
+                        result['Division'],
+                        result['Division_italic'],
+                        result['Part'],
+                        result['Part_italic'],
+                        result['Chapter'],
+                        result['Chapter_italic'],
+                        result['Article'],
+                        result['Article_italic'],
+                        result['Section'],
+                        result['Section_italic'],
+                        result['Law'],
+                        result['Law_italic'],
+                        result['URL']
+                    )
+                    
                     # Execute the SQL statement using execute_sql function
-                    db.execute_sql(conn, insert_row_sql, (entry_uuid, code, section, text, amended, url), commit=True)
+                    db.execute_sql(conn, insert_row_sql, data_tuple, commit=True)
                     self.n_entries_added += 1
 
                 conn.close()
         except Exception as e:
             print(f"\nError with db write: {e}")
+        
+    def safe_get(self, driver, url, attempts=5, backoff=5):
+        """
+        Attempts to navigate to a URL using a Selenium WebDriver. If the page load times out,
+        it retries the operation, backing off for a specified amount of time between attempts.
+
+        Parameters:
+        - driver: The Selenium WebDriver instance.
+        - url (str): The URL to navigate to.
+        - attempts (int): The maximum number of attempts to make. Default is 3.
+        - backoff (int): The amount of time (in seconds) to wait before retrying after a timeout. Default is 5 seconds.
+        """
+        current_attempt = 1
+        while current_attempt <= attempts:
+            if self.stop_event.is_set():
+                return     
+            try:
+                driver.get(url)
+                return  # If successful, exit the function
+            except Exception as e:
+                if current_attempt > 3:
+                    print(f"Attempt {current_attempt} failed with error: {e}")
+                if current_attempt == attempts:
+                    raise  # Reraise the last exception if out of attempts
+                current_attempt += 1
+                time.sleep(backoff)  # Wait before retrying
 
     def extract_links(self, driver, xpath):
         try:
@@ -121,16 +164,15 @@ class SeleniumScraper:
         logging.info(f"Scraping manylawsections at URL: {url}")
         driver = self.driver_pool.get_driver()
         try:
-            driver.get(url)
+            self.safe_get(driver, url)
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
             
-            with ThreadPoolExecutor(max_workers=50) as executor:
+            with ThreadPoolExecutor(max_workers=25) as executor:
                 futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
                 for future in as_completed(futures):
                     result = future.result()
-                    # print(result)
-                    self.insert_law_entry(self.db_file, result['Title'], result['Division'], result['Law'], "none", result['URL'])
+                    self.insert_law_entry(self.db_file, result)
         finally:
             self.driver_pool.release_driver(driver)
 
@@ -138,28 +180,64 @@ class SeleniumScraper:
         """Process a single link and return details as a dictionary."""
         driver = self.driver_pool.get_driver()
         try:
-            driver.get(url)
+            self.safe_get(driver, url)
             js_code = link.split(":", 1)[1] if ":" in link else link
             driver.execute_script(js_code)
             current_url = driver.current_url
             e = driver.find_element(By.ID, "codeLawSectionNoHead")
             top_level_divs = e.find_elements(By.XPATH, "./div")
-            result = {"Title": "", "Division": "", "Chapter": "", "Part": "", "Law": "", "URL": current_url}
+            result = {"Code": "", 
+                      "Title": "", 
+                      "Title_italic": "", 
+                      "Division": "",
+                      "Division_italic": "",
+                      "Part": "",
+                      "Part_italic": "",
+                      "Chapter": "",
+                      "Chapter_italic": "",
+                      "Article": "",
+                      "Article_italic": "",
+                      "Section": "",
+                      "Section_italic": "",
+                      "Provisions": "",
+                      "Provisions_italic": "",
+                      "Law": "",
+                      "Law_italic": "",
+                      "URL": current_url}
             for div in top_level_divs:
                 text_transform_value = div.value_of_css_property("text-transform")
                 text_indent_value = div.value_of_css_property("text-indent")
                 display_value = div.value_of_css_property("display")
                 if text_transform_value == "uppercase":
-                    result["Title"] = div.text
-                elif text_indent_value != "0px":
-                    result["Division"] = div.text
-                elif display_value == "inline":
-                    result["Chapter"] = div.text
+                    result["Code"] = div.text
+                elif text_indent_value != "0px" or display_value == "inline":
+                    if div.text.startswith("TITLE"):
+                        result["Title"] = div.find_element(By.TAG_NAME, "b").text
+                        result["Title_italic"] = div.find_element(By.TAG_NAME, "i").text
+                    elif div.text.startswith("DIVISION"):
+                        result["Division"] = div.find_element(By.TAG_NAME, "b").text
+                        result["Division_italic"] = div.find_element(By.TAG_NAME, "i").text
+                    elif div.text.startswith("PART"):
+                        result["Part"] = div.find_element(By.TAG_NAME, "b").text
+                        result["Part_italic"] = div.find_element(By.TAG_NAME, "i").text
+                    elif div.text.startswith("CHAPTER"):
+                        result["Chapter"] = div.find_element(By.TAG_NAME, "b").text
+                        result["Chapter_italic"] = div.find_element(By.TAG_NAME, "i").text
+                    elif div.text.startswith("ARTICLE"):
+                        result["Article"] = div.find_element(By.TAG_NAME, "b").text
+                        result["Article_italic"] = div.find_element(By.TAG_NAME, "i").text
+                    elif div.text.startswith("GENERAL PROVISIONS") or div.text.startswith("PROVISIONS"):
+                        result["Provisions"] = div.find_element(By.TAG_NAME, "b").text
+                        result["Provisions_italic"] = div.find_element(By.TAG_NAME, "i").text
+                    else:
+                        print(f"Error can't figure out subsection label: {div.text}")
                 else:
-                    part = div.find_element(By.TAG_NAME, "h6").text
+                    section = div.find_element(By.TAG_NAME, "h6").text
                     law = div.find_element(By.TAG_NAME, "p").text
-                    result["Part"] = part
+                    law_italic = div.find_element(By.TAG_NAME, "i").text
+                    result["Section"] = section
                     result["Law"] = law
+                    result["Law_italic"] = law_italic
         finally:
             self.driver_pool.release_driver(driver)
         return result
@@ -171,7 +249,7 @@ class SeleniumScraper:
         logging.info(f"Scraping URL: {url}")
         driver = self.driver_pool.get_driver()
         try:
-            driver.get(url)
+            self.safe_get(driver, url)
             expanded_links = self.extract_links(driver, "//*[@id='expandedbranchcodesid']//a")
             manylaw_links = {url} if driver.find_elements(By.ID, "manylawsections") else set()
         finally:

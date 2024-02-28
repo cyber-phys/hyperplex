@@ -45,9 +45,22 @@ def create_database(db_file):
             CREATE TABLE IF NOT EXISTS law_entries (
                 uuid TEXT PRIMARY KEY,
                 code TEXT,
-                section REAL,
+                title TEXT,
+                title_italic TEXT,
+                division TEXT,
+                division_italic TEXT,
+                part TEXT,
+                part_italic TEXT,
+                chapter TEXT,
+                chapter_italic TEXT,
+                article TEXT,
+                article_italic TEXT,
+                section TEXT,
+                section_italic TEXT,
+                provisions TEXT,
+                provisions_italic TEXT,
                 text TEXT,
-                amended TEXT,
+                text_italic TEXT,
                 url TEXT
             );
         ''')
