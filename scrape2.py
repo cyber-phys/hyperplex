@@ -7,6 +7,7 @@ import time
 import threading
 import os
 import sys
+import signal
 
 # Configure logging towrite to a file
 log_filename = 'scrape_log.log'
@@ -24,6 +25,16 @@ visited_links = set()
 law_section_links = set()
 law_section_links_lock = threading.Lock()
 
+# Initialize the stop event
+stop_event = threading.Event()
+executor = None
+
+def signal_handler(sig, frame):
+    print('\nQuickly exiting...')
+    stop_event.set()  # Signal all threads to stop
+    if executor is not None:
+        executor.shutdown(wait=False)  # More aggressive shutdown
+
 def display_timer(stop_event, law_section_links, law_section_links_lock, url):
     """Displays elapsed time and the current number of entries in law_section_links until the stop_event is set."""
     start_time = time.time()
@@ -34,7 +45,7 @@ def display_timer(stop_event, law_section_links, law_section_links_lock, url):
             links_count = len(law_section_links)
         # Clear the console
         os.system('cls' if os.name == 'nt' else 'clear')
-        print(f"Scraping URL: {url}\nElapsed Time: {formatted_time} | Law Section Links: {links_count}", end="")
+        print(f"Press ctl+c to exit...\nScraping URL: {url}\nElapsed Time: {formatted_time} | Law Section Links: {links_count}", end="")
         sys.stdout.flush()
         time.sleep(1)
 
@@ -54,6 +65,9 @@ def extract_links(driver, xpath):
         return []
 
 def cali_scrape_codedisplayexpand(url):
+    if stop_event.is_set():
+        return [], []
+    
     logging.info(f"Scraping URL: {url}")
     driver = setup_driver()
     driver.get(url)
@@ -70,34 +84,43 @@ def cali_scrape_codedisplayexpand(url):
     driver.quit()
     return list(set(expanded_links)), manylaw_links  # Ensure uniqueness
 
+# Set the signal handler for SIGINT
+signal.signal(signal.SIGINT, signal_handler)
+
 def cali_scrape(url):
     global visited_links
     global law_section_links
+    global executor
     urls_to_scrape = [url]
 
     # Start the timer thread
-    stop_event = threading.Event()
     timer_thread = threading.Thread(target=display_timer, args=(stop_event, law_section_links, law_section_links_lock, url))
     timer_thread.start()
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        while urls_to_scrape:
-            logging.debug("Starting new batch of URLs to scrape")
-            futures = {executor.submit(cali_scrape_codedisplayexpand, url): url for url in urls_to_scrape}
-            urls_to_scrape = []
+    # Start scraping thread pool
+    # Initialize the executor globally if not already initialized
+    if executor is None:
+        executor = ThreadPoolExecutor(max_workers=50)
+    
+    while urls_to_scrape:
+        logging.debug("Starting new batch of URLs to scrape")
+        futures = {executor.submit(cali_scrape_codedisplayexpand, url): url for url in urls_to_scrape}
+        urls_to_scrape = []
 
-            for future in as_completed(futures):
-                expanded_links, manylaw_links = future.result()
-                with law_section_links_lock:
-                    law_section_links.update(set(filter(lambda href: href not in law_section_links, manylaw_links)))
-                new_links = list(filter(lambda href: href not in visited_links, expanded_links))
-                visited_links.update(new_links)
-                urls_to_scrape.extend(new_links)
+        for future in as_completed(futures):
+            expanded_links, manylaw_links = future.result()
+            with law_section_links_lock:
+                law_section_links.update(set(filter(lambda href: href not in law_section_links, manylaw_links)))
+            new_links = list(filter(lambda href: href not in visited_links, expanded_links))
+            visited_links.update(new_links)
+            urls_to_scrape.extend(new_links)
 
-    # Stop the timer thread
+    # Stop timer thread
     stop_event.set()
     timer_thread.join()
 
+    print("Scraping completed")
+    print(law_section_links)
     logging.info("Scraping done")
     logging.info(f"Law section links: {law_section_links}")
 
