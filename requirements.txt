@@ -4,3 +4,5 @@ markdownify
 sanic
 sanic-ext
 sentence-transformers
+pandas
+selenium
