@@ -16,8 +16,8 @@ def connect_db(db_file):
         print(f"Error connecting to database: {e}")
         return None
 
-def execute_sql(conn, sql, params=None, commit=False):
-    """Execute SQL commands with optional commit, now supports SQL parameters."""
+def execute_sql(conn, sql, params=None, commit=False, fetchone=False, fetchall=False):
+    """Execute SQL commands with optional commit and fetchone, now supports SQL parameters."""
     try:
         c = conn.cursor()
         if params:
@@ -26,6 +26,10 @@ def execute_sql(conn, sql, params=None, commit=False):
             c.execute(sql)
         if commit:
             conn.commit()
+        if fetchone:
+            return c.fetchone()
+        if fetchall:
+            return c.fetchall()
     except Error as e:
         print(f"Error executing SQL: {e}")
         if "UNIQUE constraint failed" in str(e):
@@ -74,7 +78,7 @@ def create_database(db_file):
         # Table for embeddings 
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS embeddings (
-                uuid TEXT PRIMARY KEY
+                uuid TEXT PRIMARY KEY,
                 model_uuid TEXT NOT NULL,
                 law_entry_uuid TEXT NOT NULL,
                 creation_time TEXT NOT NULL,
