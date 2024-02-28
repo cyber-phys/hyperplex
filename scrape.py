@@ -7,6 +7,7 @@ import sqlite3
 import re
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
 
 tld = "https://leginfo.legislature.ca.gov"
 url = "https://leginfo.legislature.ca.gov/faces/codes.xhtml"
@@ -217,9 +218,89 @@ def scrape_links(url):
 
 ## codes_to_list
 ## expandedbranchcodesid
-def test_js_parse(url):
+def cali_expand_scrape(url):
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Enables headless mode
+    chrome_options.add_argument("--no-sandbox")  # Bypass OS security model, required in some environments
+    chrome_options.add_argument("--disable-gpu")  # Applicable only to windows os
+    chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+
+    driver = webdriver.Chrome(options=chrome_options)
     # Create a new instance of the Chrome driver
-    driver = webdriver.Chrome()
+    # driver = webdriver.Chrome(options=chrome_options)
+
+    # Navigate to the page
+    driver.get(url)
+    print(url)
+    try:
+        expandedbranchcodesid = driver.find_element(By.XPATH, "//*[@id='expandedbranchcodesid']")
+        if expandedbranchcodesid:
+            links = expandedbranchcodesid.find_elements(By.TAG_NAME, 'a')
+            for link in links:
+                href = link.get_attribute("href")
+                print(href)
+                if href not in visted_links:
+                    visted_links.append(href)
+                    cali_expand_scrape(href)
+                else:
+                    print(f"href in visted_links: {href}")
+    except Exception as e:
+        print("no div id=expandedbranchcodesid:", e)
+
+    try:
+        manylawsections = driver.find_element(By.ID, "manylawsections")
+        if manylawsections:
+            elements = manylawsections.find_elements(By.TAG_NAME, 'a')
+            # Print the href attributes of the extracted links
+            num_elements = len(elements)
+
+            for i in range(num_elements):
+                # Navigate to the page
+                driver.get(url)
+                # Find the element with the JavaScript-based URL
+                element = driver.find_element(By.ID, "manylawsections")
+                elements = element.find_elements(By.TAG_NAME, 'a')
+                for link in elements:
+                    href = link.get_attribute("href")
+                    if href not in visted_links:
+                        print(link.get_attribute("href"))
+                        driver.execute_script("arguments[0].click();", link)
+                        e = driver.find_element(By.ID, "codeLawSectionNoHead")
+                        top_level_divs = e.find_elements(By.XPATH, "./div")
+                        for div in top_level_divs:
+                            text_transform_value = div.value_of_css_property("text-transform")
+                            text_indent_value = div.value_of_css_property("text-indent")
+                            display_value = div.value_of_css_property("display")
+                            if text_transform_value == "uppercase":
+                                print(f"Title: {div.text}")
+                            elif (text_indent_value != "0px"):
+                                print(f"Division: {div.text}")
+                            elif (display_value == "inline"):
+                                print(f"Chapter: {div.text}")
+                            else:
+                                part = div.find_element(By.TAG_NAME,"h6")
+                                law = div.find_element(By.TAG_NAME, "p")
+                                print(f"Part: {part.text}")
+                                print(f"Law: {law.text}")
+                        # print(e.text)
+                        visted_links.append(href)
+                        break
+                    else:
+                        print(f"href in visted_links: {href}")
+    except Exception as e:
+        print("no div id=manylawsections:", e)
+
+
+def test_js_parse(url):
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Enables headless mode
+    chrome_options.add_argument("--no-sandbox")  # Bypass OS security model, required in some environments
+    chrome_options.add_argument("--disable-gpu")  # Applicable only to windows os
+    chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+
+    driver = webdriver.Chrome(options=chrome_options)
+    # Create a new instance of the Chrome driver
+    # driver = webdriver.Chrome(options=chrome_options)
 
     # Navigate to the page
     driver.get(url)
@@ -234,7 +315,7 @@ def test_js_parse(url):
                     visted_links.append(href)
                     test_js_parse(tld + href)
     except:
-        print("no codes_toc_list")
+        print("no div id=codestreeFrom2")
 
     try:
         expandedbranchcodesid = driver.find_element(By.ID, "expandedbranchcodesid")
@@ -244,9 +325,10 @@ def test_js_parse(url):
                 href = link.get_attribute("href")
                 if href not in visted_links:
                     visted_links.append(href)
+                    print(f"Going to link {href}")
                     test_js_parse(tld + href)
     except:
-        print("no expandedbranchcodesid")
+        print("no div id=expandedbranchcodesid")
 
     manylawsections = driver.find_element(By.ID, "manylawsections")
     if manylawsections:
@@ -286,6 +368,31 @@ def test_js_parse(url):
                     visted_links.append(href)
                     break
 
+def get_sections():
+    tld = "https://leginfo.legislature.ca.gov"
+    sections_url = "https://leginfo.legislature.ca.gov/faces/codes_displayText.xhtml"
+    
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Enables headless mode
+    chrome_options.add_argument("--no-sandbox")  # Bypass OS security model, required in some environments
+    chrome_options.add_argument("--disable-gpu")  # Applicable only to windows os
+    chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+
+    driver = webdriver.Chrome(options=chrome_options)
+
+    # Navigate to the list of sections
+    driver.get(sections_url)
+    try:
+        sections_div = driver.find_element(By.ID, 'codestocheader')
+        if sections_div:
+            links = element.find_elements(By.TAG_NAME, 'a')
+            for link in links:
+                href = link.get_attribute("href")
+                test_js_parse(tld + href)
+    except:
+        print("no div id=codestocheader")
+    
+
 
     # # Extract the JavaScript function and its arguments
     # js_function = element.get_attribute('href')
@@ -316,4 +423,6 @@ def test_js_parse(url):
 # test_js_parse("https://leginfo.legislature.ca.gov/faces/codes_displayText.xhtml?lawCode=FGC&division=0.5.&title=&part=&chapter=1.&article=")
 visted_links = []
 # test_js_parse("https://leginfo.legislature.ca.gov/faces/codes_displayText.xhtml?lawCode=CIV&heading2=PRELIMINARY%20PROVISIONS")
-test_js_parse("https://leginfo.legislature.ca.gov/faces/codesTOCSelected.xhtml?tocCode=CIV&tocTitle=+Civil+Code+-+CIV")
+# test_js_parse("https://leginfo.legislature.ca.gov/faces/codesTOCSelected.xhtml?tocCode=CIV&tocTitle=+Civil+Code+-+CIV")
+# get_sections()
+cali_expand_scrape("https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC")
