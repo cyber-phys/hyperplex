@@ -21,10 +21,15 @@ Somthing like [this](https://arxiv.org/pdf/2004.13821v1.pdf) but for chatgpt con
 
 ![Multi Hop QA](./MULTI_HOP_QUESTION_ANSWERING.png)
 
+**Entity Typing**
+
+[Interpretable Entity Representations through Large-Scale Typing](https://arxiv.org/pdf/2005.00147.pdf)
+
 **Legal Bert**
+
 https://huggingface.co/nlpaueb/legal-bert-base-uncased
 
-unfortunately this model is uncased,I would think cased would be more useful in legal tasks where defined terms are usually cased.
+unfortunately this model is uncased, I would think cased would be more useful in legal tasks where defined terms are usually cased.
 
 ## Building out a knowledge graph
 Entity Typing:
