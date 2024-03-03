@@ -12,6 +12,10 @@ from selenium import webdriver
 from threading import Semaphore
 import db
 import uuid
+from datetime import datetime
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
 
 class WebDriverPool:
     def __init__(self, max_size=100):
@@ -47,17 +51,18 @@ class WebDriverPool:
             driver.quit()
 
 class SeleniumScraper:
-    def __init__(self, base_urls, db_file):
+    def __init__(self, base_urls, db_file, jurisdiction):
         self.base_urls = base_urls
         self.visited_links = set()
         self.law_section_links = set()
         self.processed_manylaw_links = set()
-        self.executor = ThreadPoolExecutor(max_workers=20)
-        self.manylaw_executor = ThreadPoolExecutor(max_workers=10)
+        self.executor = ThreadPoolExecutor(max_workers=5)
+        self.manylaw_executor = ThreadPoolExecutor(max_workers=5)
         self.stop_event = threading.Event()
-        self.driver_pool = WebDriverPool(max_size=100)
+        self.driver_pool = WebDriverPool(max_size=20)
         self.db_file = db_file
         self.n_entries_added = 0
+        self.jurisdiction = jurisdiction
         signal.signal(signal.SIGINT, self.signal_handler)
 
     def signal_handler(self, sig, frame):
@@ -69,7 +74,7 @@ class SeleniumScraper:
     def insert_law_entry(self, db_file, result):
         """
         Inserts a new law entry into the law_entries table in the SQLite database.
-        The result parameter is a dictionary containing all the necessary fields.
+        Also populates the law_structure table with hierarchical data.
 
         Parameters:
         - db_file (str): The file path to the SQLite database.
@@ -88,43 +93,49 @@ class SeleniumScraper:
                     print(f"\nError: Duplicate entry with text '{result['Law'][:30]}...'\nCurrent URL: {result['URL']}\nDB Match URL: {existing_url}\n")
                 else:
                     # Generate a unique UUID for the new entry
-                    entry_uuid = str(uuid.uuid4())
+                    law_entry_uuid = str(uuid.uuid4())
                     
-                    # SQL statement to insert a new row
                     insert_row_sql = """
-                    INSERT INTO law_entries (uuid, code, title, title_italic, division, division_italic, part, part_italic, chapter, chapter_italic, article, article_italic, section, section_italic, text, text_italic, url)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    INSERT INTO law_entries (uuid, text, url, creation_time)
+                    VALUES (?, ?, ?, datetime('now'));
                     """
                     
                     # Prepare the data tuple from the result dictionary
-                    data_tuple = (
-                        entry_uuid,
-                        result['Code'],
-                        result['Title'],
-                        result['Title_italic'],
-                        result['Division'],
-                        result['Division_italic'],
-                        result['Part'],
-                        result['Part_italic'],
-                        result['Chapter'],
-                        result['Chapter_italic'],
-                        result['Article'],
-                        result['Article_italic'],
-                        result['Section'],
-                        result['Section_italic'],
+                    law_entry_tuple = (
+                        law_entry_uuid,
                         result['Law'],
-                        result['Law_italic'],
-                        result['URL']
+                        result['URL'],
                     )
                     
-                    # Execute the SQL statement using execute_sql function
-                    db.execute_sql(conn, insert_row_sql, data_tuple, commit=True)
+                    # Execute the SQL statement to insert the law entry
+                    db.execute_sql(conn, insert_row_sql, law_entry_tuple, commit=True)
                     self.n_entries_added += 1
+
+                    # Insert hierarchical data into law_structure
+                    hierarchy = ['Jurisdiction', 'Code', 'Division', 'Part', 'Title', 'Chapter', 'Article', 'Provision', 'Section']
+                    parent_uuid = None  # Initialize parent_uuid for the top level
+                    for level in hierarchy:
+                        if result.get(level):
+                            structure_uuid = str(uuid.uuid4())
+                            insert_structure_sql = """
+                            INSERT INTO law_structure (uuid, type, text, text_italic, child_uuid, law_uuid)
+                            VALUES (?, ?, ?, ?, ?, ?);
+                            """
+                            structure_tuple = (
+                                structure_uuid,
+                                level.lower(),  # Convert to lowercase to match the 'type' CHECK constraint
+                                result[level],
+                                result.get(f"{level}_italic", ""),
+                                parent_uuid,  # This will be NULL for the top level
+                                law_entry_uuid,
+                            )
+                            db.execute_sql(conn, insert_structure_sql, structure_tuple, commit=True)
+                            parent_uuid = structure_uuid  # Update parent_uuid for the next level
 
                 conn.close()
         except Exception as e:
             print(f"\nError with db write: {e}")
-        
+            
     def safe_get(self, driver, url, attempts=5, backoff=5):
         """
         Attempts to navigate to a URL using a Selenium WebDriver. If the page load times out,
@@ -165,16 +176,22 @@ class SeleniumScraper:
         driver = self.driver_pool.get_driver()
         try:
             self.safe_get(driver, url)
+            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "manylawsections")))
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
             
-            with ThreadPoolExecutor(max_workers=25) as executor:
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
                 for future in as_completed(futures):
                     result = future.result()
                     self.insert_law_entry(self.db_file, result)
+        except Exception as e:
+            logging.error(f"Exception in scrape_manylawsections for URL {url}: {e}")
+            print(f"retrying url: {url}")
+            self.scrape_manylawsections(url)
         finally:
             self.driver_pool.release_driver(driver)
+            logging.info(f"Finished scrape_manylawsections for URL: {url}")
 
     def process_link(self, link, url):
         """Process a single link and return details as a dictionary."""
@@ -184,25 +201,28 @@ class SeleniumScraper:
             js_code = link.split(":", 1)[1] if ":" in link else link
             driver.execute_script(js_code)
             current_url = driver.current_url
+            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "codeLawSectionNoHead")))
             e = driver.find_element(By.ID, "codeLawSectionNoHead")
             top_level_divs = e.find_elements(By.XPATH, "./div")
-            result = {"Code": "", 
-                      "Title": "", 
-                      "Title_italic": "", 
-                      "Division": "",
-                      "Division_italic": "",
-                      "Part": "",
-                      "Part_italic": "",
-                      "Chapter": "",
-                      "Chapter_italic": "",
-                      "Article": "",
-                      "Article_italic": "",
-                      "Section": "",
-                      "Section_italic": "",
-                      "Provisions": "",
-                      "Provisions_italic": "",
-                      "Law": "",
-                      "Law_italic": "",
+            result = {"Jurisdiction": self.jurisdiction,
+                      "Code": None,
+                      "Division": None,
+                      "Division_italic": None,
+                      "Title": None, 
+                      "Title_italic": None,
+                      "Part": None,
+                      "Part_italic": None,
+                      "Chapter": None,
+                      "Chapter_italic": None,
+                      "Article": None,
+                      "Article_italic": None,
+                      "Section": None,
+                      "Provisions": None,
+                      "Provisions_italic": None,
+                      "Section": None,
+                      "Section_italic": None,
+                      "Law": None,
+                      "Law_italic": None,
                       "URL": current_url}
             for div in top_level_divs:
                 text_transform_value = div.value_of_css_property("text-transform")
@@ -233,11 +253,23 @@ class SeleniumScraper:
                         print(f"Error can't figure out subsection label: {div.text}")
                 else:
                     section = div.find_element(By.TAG_NAME, "h6").text
-                    law = div.find_element(By.TAG_NAME, "p").text
-                    law_italic = div.find_element(By.TAG_NAME, "i").text
+                    section_italic = div.find_element(By.TAG_NAME, "i").text
+                    law_p = div.find_elements(By.TAG_NAME, "p")
                     result["Section"] = section
-                    result["Law"] = law
-                    result["Law_italic"] = law_italic
+                    result["Section_italic"] = section_italic
+                    law = ''
+                    for law_i, paragraph in enumerate(law_p):
+                        if law_i == 0:
+                            law = paragraph.text
+                        else:
+                            law += "\n" + paragraph.text
+                    if law != '':
+                        result["Law"] = law
+                    else:
+                        print(f"ERROR law is blank for url: {current_url}\n")
+        except Exception as e:
+            logging.error(f"Exception in process_url for Url: {url}: {e}")
+            logging.error(f"Exception in process_url for Link: {current_url}: {e}")
         finally:
             self.driver_pool.release_driver(driver)
         return result
@@ -277,6 +309,8 @@ class SeleniumScraper:
         timer_thread = threading.Thread(target=partial(self.display_timer, "California"))
         timer_thread.start()
 
+        manylaw_futures = set()
+
         while urls_to_scrape:
             futures = {self.executor.submit(self.scrape_url, url): url for url in urls_to_scrape}
             urls_to_scrape = []
@@ -288,27 +322,44 @@ class SeleniumScraper:
                 self.visited_links.update(new_links)
                 urls_to_scrape.extend(new_links)
 
-                links_to_remove = set()
+                # links_to_remove = set()
                 for manylaw_link in manylaw_links:
                     if manylaw_link not in self.processed_manylaw_links:
-                        self.manylaw_executor.submit(self.scrape_manylawsections, manylaw_link)
+                        manylaw_future = self.manylaw_executor.submit(self.scrape_manylawsections, manylaw_link)
+                        manylaw_futures.add(manylaw_future) 
                         self.processed_manylaw_links.add(manylaw_link)
-                        links_to_remove.add(manylaw_link)
+                        # links_to_remove.add(manylaw_link)
 
-                manylaw_links -= links_to_remove
+                # manylaw_links -= links_to_remove
 
-        self.stop_event.set()
-        timer_thread.join()
+        # Check if any future is still running
+        while not self.stop_event.is_set():
+            # Get the count of futures that are not done
+            running_tasks = [f for f in manylaw_futures if not f.done()]
+            if not running_tasks:
+                break  # Exit the loop if no tasks are running
+            logging.info(f"Waiting for {len(running_tasks)} tasks to complete...")
+            for i, task in enumerate(running_tasks, start=1):
+                logging.debug(f"Task {i}/{len(running_tasks)} is still running.")
+            time.sleep(1)  # Wait for a bit before checking again
+
+        logging.info("All tasks have been completed.")
         self.manylaw_executor.shutdown(wait=True)
+        timer_thread.join()
+        self.stop_event.set()
         print("\nScraping completed")
         logging.info("Scraping done")
         logging.info(f"Law section links: {self.law_section_links}")
 
+
 if __name__ == "__main__":
+    log_file_name = f"scrape_log_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.log"
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s - %(levelname)s - %(message)s',
-                        handlers=[logging.FileHandler('scrape_log.log', 'a', 'utf-8')])
-    db_file = "test.db"
+                        handlers=[logging.FileHandler(log_file_name, 'a', 'utf-8')])
+
+    db_file = f"law_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.db"
+    jurisdiction="CA"
     db.create_database(db_file)
     urls = ["https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CIV",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
@@ -340,5 +391,5 @@ if __name__ == "__main__":
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"]
-    scraper = SeleniumScraper(urls, db_file)
+    scraper = SeleniumScraper(urls, db_file, jurisdiction)
     scraper.start_scraping()
