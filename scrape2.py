@@ -19,6 +19,12 @@ import argparse
 
 class WebDriverPool:
     def __init__(self, max_size=100):
+        """
+        Initializes a pool of Selenium WebDriver instances.
+
+        Parameters:
+        - max_size (int): The maximum number of WebDriver instances in the pool.
+        """
         self.available_drivers = Queue(maxsize=max_size)
         self.semaphore = Semaphore(max_size)
         self.chrome_options = self.setup_chrome_options()
@@ -27,6 +33,12 @@ class WebDriverPool:
 
     @staticmethod
     def setup_chrome_options():
+        """
+        Sets up the Chrome options for all WebDriver instances.
+
+        Returns:
+        - Options: A configured Options instance with arguments for headless operation and other settings.
+        """
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
@@ -35,20 +47,43 @@ class WebDriverPool:
         return chrome_options
 
     def create_driver(self):
+        """
+        Creates a new WebDriver instance with the predefined Chrome options.
+
+        Returns:
+        - WebDriver: A new instance of Chrome WebDriver.
+        """
         return webdriver.Chrome(options=self.chrome_options)
 
     def get_driver(self):
+        """
+        Retrieves an available WebDriver instance from the pool.
+
+        Returns:
+        - WebDriver: An available WebDriver instance.
+        """
         self.semaphore.acquire()
         return self.available_drivers.get()
 
     def release_driver(self, driver):
+        """
+        Returns a WebDriver instance back to the pool.
+
+        Parameters:
+        - driver (WebDriver): The WebDriver instance to be returned to the pool.
+        """
         self.available_drivers.put(driver)
         self.semaphore.release()
     
     def quit_all_drivers(self):
+        """
+        Quits all WebDriver instances in the pool and closes all associated browser windows.
+        """
         while not self.available_drivers.empty():
             driver = self.available_drivers.get()
             driver.quit()
+    
+
 
 class SeleniumScraper:
     def __init__(self, db_file, jurisdiction):
