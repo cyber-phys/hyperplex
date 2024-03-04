@@ -145,6 +145,7 @@ class SeleniumScraper:
     def __init__(self, db_file, jurisdiction):
         self.base_urls = []
         self.visited_links = set()
+        self.law_section_links = set()
         self.executor = ThreadPoolExecutor(max_workers=10)
         self.stop_event = threading.Event()
         self.driver_pool = WebDriverPool(max_size=200)
@@ -224,7 +225,7 @@ class SeleniumScraper:
 
                 conn.close()
         except Exception as e:
-            print(f"\nError with db write: {e}")
+            print(f"\nError with db write: {e}\n")
 
     def extract_links(self, driver, xpath):
         try:
@@ -262,7 +263,6 @@ class SeleniumScraper:
 class CaliforniaScraper(SeleniumScraper):
     def __init__(self, db_file):
         super().__init__(db_file, jurisdiction="CA")
-        self.law_section_links = set()
         self.processed_manylaw_links = set()
         self.manylaw_executor = ThreadPoolExecutor(max_workers=5)
         self.base_urls = [
@@ -479,7 +479,6 @@ class OhioScraper(SeleniumScraper):
         ]
 
     def start_scraping(self):
-        self.jurisdiction = "OH"
         self.base_urls = ["https://codes.ohio.gov/ohio-constitution"]
 
         urls_to_scrape = self.base_urls
@@ -487,7 +486,7 @@ class OhioScraper(SeleniumScraper):
         timer_thread.start()
 
         while urls_to_scrape:
-            futures = {self.executor.submit(self.scrape_url_ohio, url): url for url in urls_to_scrape}
+            futures = {self.executor.submit(self.scrape_url, url): url for url in urls_to_scrape}
             urls_to_scrape = []
 
             for future in as_completed(futures):
@@ -500,7 +499,7 @@ class OhioScraper(SeleniumScraper):
         urls_to_scrape = self.base_urls
 
         while urls_to_scrape:
-            futures = {self.executor.submit(self.scrape_url_ohio, url): url for url in urls_to_scrape}
+            futures = {self.executor.submit(self.scrape_url, url): url for url in urls_to_scrape}
             urls_to_scrape = []
 
             for future in as_completed(futures):
@@ -513,7 +512,7 @@ class OhioScraper(SeleniumScraper):
         urls_to_scrape = self.base_urls
 
         while urls_to_scrape:
-            futures = {self.executor.submit(self.scrape_url_ohio, url): url for url in urls_to_scrape}
+            futures = {self.executor.submit(self.scrape_url, url): url for url in urls_to_scrape}
             urls_to_scrape = []
 
             for future in as_completed(futures):
@@ -530,7 +529,7 @@ class OhioScraper(SeleniumScraper):
         logging.info("Scraping done")
 
     ## For Ohio we have to expand a list of links to the law until we finally get to the law
-    def scrape_url_ohio(self, url):
+    def scrape_url(self, url):
         if self.stop_event.is_set():
             return set()        
         
@@ -540,7 +539,7 @@ class OhioScraper(SeleniumScraper):
         result = {}
         try:
             driver.safe_get(url)
-            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.CLASS_NAME, "laws-table")))
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, "laws-table")))
             lawTable = driver.find_element(By.CLASS_NAME, "laws-table")
             lawTableLinks = lawTable.find_elements(By.TAG_NAME, 'a')
             for link in lawTableLinks:
@@ -550,7 +549,7 @@ class OhioScraper(SeleniumScraper):
                 else:
                     logging.error(f"Error NO LINK found at url: {url}")
         except Exception as e1:
-            print(f"No such element: {url}")
+            print(f"\nError e1: {e1}\n")
             try:
                 result = {"Jurisdiction": self.jurisdiction,
                       "Code": None,
@@ -614,7 +613,7 @@ class OhioScraper(SeleniumScraper):
                 result["Law"] = law_text
                 self.insert_law_entry(self.db_file, result)
             except Exception as e2:
-                print("\n" + url + "\n")
+                print(f"\nError e2: {e2}\n url: {url} \n")
                 logging.error(f"Error {url} {e2}")
         finally:
             self.driver_pool.release_driver(driver)
@@ -639,4 +638,4 @@ if __name__ == "__main__":
         scraper.start_scraping()
     elif jurisdiction == "OH":
         scraper = OhioScraper(db_file)
-        scraper.start_scraping_ohio()
+        scraper.start_scraping()
