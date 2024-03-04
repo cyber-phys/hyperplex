@@ -16,6 +16,70 @@ from datetime import datetime
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import argparse
+from selenium.webdriver import Chrome
+
+class CustomWebDriver(Chrome):
+    """
+    CustomWebDriver extends the functionality of the Selenium Chrome WebDriver.
+    
+    This class provides additional methods for robust web scraping, such as the ability
+    to safely navigate to URLs with retry logic in case of page load failures.
+    
+    Attributes:
+        Inherits all attributes from the Selenium Chrome WebDriver class.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        """
+        Initializes the CustomWebDriver with the given arguments.
+        
+        Args:
+            *args: Variable length argument list to pass to the Chrome WebDriver.
+            **kwargs: Arbitrary keyword arguments to pass to the Chrome WebDriver.
+        """
+        chrome_options = self.setup_chrome_options()
+        super().__init__(*args, options=chrome_options, **kwargs)
+
+    @staticmethod
+    def setup_chrome_options():
+        """
+        Sets up the Chrome options for the CustomWebDriver instance.
+
+        Returns:
+            Options: A configured Options instance with arguments for headless operation and other settings.
+        """
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        return chrome_options
+
+    def safe_get(self, url, attempts=5, backoff=5):
+        """
+        Attempts to navigate to a URL using a Selenium WebDriver. If the page load times out,
+        it retries the operation, backing off for a specified amount of time between attempts.
+        
+        Args:
+            url (str): The URL to navigate to.
+            attempts (int): The maximum number of attempts to make. Default is 5.
+            backoff (int): The amount of time (in seconds) to wait before retrying after a timeout. Default is 5 seconds.
+        
+        Raises:
+            Exception: If the navigation fails after the specified number of attempts.
+        """
+        current_attempt = 1
+        while current_attempt <= attempts:
+            try:
+                self.get(url)
+                return  # If successful, exit the function
+            except Exception as e:
+                if current_attempt > 3:
+                    print(f"Attempt {current_attempt} failed with error: {e}")
+                if current_attempt == attempts:
+                    raise  # Reraise the last exception if out of attempts
+                current_attempt += 1
+                time.sleep(backoff)  # Wait before retrying
 
 class WebDriverPool:
     def __init__(self, max_size=100):
@@ -27,33 +91,17 @@ class WebDriverPool:
         """
         self.available_drivers = Queue(maxsize=max_size)
         self.semaphore = Semaphore(max_size)
-        self.chrome_options = self.setup_chrome_options()
         for _ in range(max_size):
             self.available_drivers.put(self.create_driver())
 
-    @staticmethod
-    def setup_chrome_options():
-        """
-        Sets up the Chrome options for all WebDriver instances.
-
-        Returns:
-        - Options: A configured Options instance with arguments for headless operation and other settings.
-        """
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        return chrome_options
-
     def create_driver(self):
         """
-        Creates a new WebDriver instance with the predefined Chrome options.
+        Creates a new CustomWebDriver instance.
 
         Returns:
-        - WebDriver: A new instance of Chrome WebDriver.
+            CustomWebDriver: A new instance of CustomWebDriver.
         """
-        return webdriver.Chrome(options=self.chrome_options)
+        return CustomWebDriver()
 
     def get_driver(self):
         """
@@ -83,8 +131,15 @@ class WebDriverPool:
             driver = self.available_drivers.get()
             driver.quit()
     
+    def get_all_drivers(self):
+        """
+        Retrieves a list of all WebDriver instances currently in the pool.
 
-
+        Returns:
+        - List[WebDriver]: A list of WebDriver instances.
+        """
+        return list(self.available_drivers.queue)
+    
 class SeleniumScraper:
     def __init__(self, db_file, jurisdiction):
         self.base_urls = []
@@ -170,32 +225,6 @@ class SeleniumScraper:
                 conn.close()
         except Exception as e:
             print(f"\nError with db write: {e}")
-            
-    def safe_get(self, driver, url, attempts=5, backoff=5):
-        """
-        Attempts to navigate to a URL using a Selenium WebDriver. If the page load times out,
-        it retries the operation, backing off for a specified amount of time between attempts.
-
-        Parameters:
-        - driver: The Selenium WebDriver instance.
-        - url (str): The URL to navigate to.
-        - attempts (int): The maximum number of attempts to make. Default is 3.
-        - backoff (int): The amount of time (in seconds) to wait before retrying after a timeout. Default is 5 seconds.
-        """
-        current_attempt = 1
-        while current_attempt <= attempts:
-            if self.stop_event.is_set():
-                return     
-            try:
-                driver.get(url)
-                return  # If successful, exit the function
-            except Exception as e:
-                if current_attempt > 3:
-                    print(f"Attempt {current_attempt} failed with error: {e}")
-                if current_attempt == attempts:
-                    raise  # Reraise the last exception if out of attempts
-                current_attempt += 1
-                time.sleep(backoff)  # Wait before retrying
 
     def extract_links(self, driver, xpath):
         try:
@@ -210,7 +239,7 @@ class SeleniumScraper:
         logging.info(f"Scraping manylawsections at URL: {url}")
         driver = self.driver_pool.get_driver()
         try:
-            self.safe_get(driver, url)
+            drive.safe_get(url)
             WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "manylawsections")))
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
