@@ -152,6 +152,7 @@ class SeleniumScraper:
         self.driver_pool = WebDriverPool(max_size=200)
         self.db_file = db_file
         self.n_entries_added = 0
+        self.n_entries_lock = threading.Lock()
         self.jurisdiction = jurisdiction
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -180,7 +181,7 @@ class SeleniumScraper:
                 
                 if existing_entry:
                     existing_url, existing_text = existing_entry
-                    print(f"\nError: Duplicate entry with text '{result['Law'][:30]}...'\nCurrent URL: {result['URL']}\nDB Match URL: {existing_url}\n")
+                    logging.error(f"\nError: Duplicate entry with text '{result['Law'][:30]}...'\nCurrent URL: {result['URL']}\nDB Match URL: {existing_url}\n")
                 else:
                     # Generate a unique UUID for the new entry
                     law_entry_uuid = str(uuid.uuid4())
@@ -199,7 +200,8 @@ class SeleniumScraper:
                     
                     # Execute the SQL statement to insert the law entry
                     db.execute_sql(conn, insert_row_sql, law_entry_tuple, commit=True)
-                    self.n_entries_added += 1
+                    with self.n_entries_lock:
+                        self.n_entries_added += 1
 
                     # Insert hierarchical data into law_structure
                     hierarchy = ['Jurisdiction', 'Code', 'Division', 'Part', 'Title', 'Chapter', 'Article', 'Provision', 'Section']
@@ -239,7 +241,7 @@ class SeleniumScraper:
         logging.info(f"Scraping manylawsections at URL: {url}")
         driver = self.driver_pool.get_driver()
         try:
-            drive.safe_get(url)
+            driver.safe_get(url)
             WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "manylawsections")))
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
@@ -262,7 +264,7 @@ class SeleniumScraper:
         """Process a single link and return details as a dictionary."""
         driver = self.driver_pool.get_driver()
         try:
-            self.safe_get(driver, url)
+            driver.safe_get(url)
             js_code = link.split(":", 1)[1] if ":" in link else link
             driver.execute_script(js_code)
             current_url = driver.current_url
@@ -346,7 +348,7 @@ class SeleniumScraper:
         logging.info(f"Scraping URL: {url}")
         driver = self.driver_pool.get_driver()
         try:
-            self.safe_get(driver, url)
+            driver.safe_get(url)
             expanded_links = self.extract_links(driver, "//*[@id='expandedbranchcodesid']//a")
             manylaw_links = {url} if driver.find_elements(By.ID, "manylawsections") else set()
         finally:
@@ -363,7 +365,7 @@ class SeleniumScraper:
         law_links = set()
         result = {}
         try:
-            self.safe_get(driver, url)
+            driver.safe_get(url)
             WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.CLASS_NAME, "laws-table")))
             lawTable = driver.find_element(By.CLASS_NAME, "laws-table")
             lawTableLinks = lawTable.find_elements(By.TAG_NAME, 'a')
@@ -452,7 +454,8 @@ class SeleniumScraper:
             elapsed_time = time.time() - start_time
             formatted_time = f"{elapsed_time:5.2f} seconds"
             links_count = len(self.law_section_links)
-            n_entries = self.n_entries_added
+            with self.n_entries_lock:
+                n_entries = self.n_entries_added
             # Clear the dynamic content line using ANSI escape code and update it
             # This assumes the cursor is already on the line to be cleared
             print(f"\r\033[KElapsed Time: {formatted_time} | Law Section Links: {links_count} | Entries Added: {n_entries}", end="")
