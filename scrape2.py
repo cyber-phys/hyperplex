@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-
+import argparse
 
 class WebDriverPool:
     def __init__(self, max_size=100):
@@ -51,15 +51,15 @@ class WebDriverPool:
             driver.quit()
 
 class SeleniumScraper:
-    def __init__(self, base_urls, db_file, jurisdiction):
-        self.base_urls = base_urls
+    def __init__(self, db_file, jurisdiction):
+        self.base_urls = []
         self.visited_links = set()
         self.law_section_links = set()
         self.processed_manylaw_links = set()
-        self.executor = ThreadPoolExecutor(max_workers=5)
-        self.manylaw_executor = ThreadPoolExecutor(max_workers=5)
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.manylaw_executor = ThreadPoolExecutor(max_workers=1)
         self.stop_event = threading.Event()
-        self.driver_pool = WebDriverPool(max_size=20)
+        self.driver_pool = WebDriverPool(max_size=200)
         self.db_file = db_file
         self.n_entries_added = 0
         self.jurisdiction = jurisdiction
@@ -180,7 +180,7 @@ class SeleniumScraper:
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
             
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=15) as executor:
                 futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
                 for future in as_completed(futures):
                     result = future.result()
@@ -188,6 +188,7 @@ class SeleniumScraper:
         except Exception as e:
             logging.error(f"Exception in scrape_manylawsections for URL {url}: {e}")
             print(f"retrying url: {url}")
+            # TODO we should handel this better
             self.scrape_manylawsections(url)
         finally:
             self.driver_pool.release_driver(driver)
@@ -288,6 +289,97 @@ class SeleniumScraper:
             self.driver_pool.release_driver(driver)
         return expanded_links, manylaw_links
     
+    ## For Ohio we have to expand a list of links to the law until we finally get to the law
+    def scrape_url_ohio(self, url):
+        if self.stop_event.is_set():
+            return set()        
+        
+        logging.info(f"Scraping URL: {url}")
+        driver = self.driver_pool.get_driver()
+        law_links = set()
+        result = {}
+        try:
+            self.safe_get(driver, url)
+            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.CLASS_NAME, "laws-table")))
+            lawTable = driver.find_element(By.CLASS_NAME, "laws-table")
+            lawTableLinks = lawTable.find_elements(By.TAG_NAME, 'a')
+            for link in lawTableLinks:
+                h = link.get_attribute("href")
+                if h:
+                    law_links.add(h)
+                else:
+                    logging.error(f"Error NO LINK found at url: {url}")
+        except Exception as e1:
+            print(f"No such element: {url}")
+            try:
+                result = {"Jurisdiction": self.jurisdiction,
+                      "Code": None,
+                      "Division": None,
+                      "Division_italic": None,
+                      "Title": None, 
+                      "Title_italic": None,
+                      "Part": None,
+                      "Part_italic": None,
+                      "Chapter": None,
+                      "Chapter_italic": None,
+                      "Article": None,
+                      "Article_italic": None,
+                      "Section": None,
+                      "Provisions": None,
+                      "Provisions_italic": None,
+                      "Section": None,
+                      "Section_italic": None,
+                      "Law": None,
+                      "Law_italic": None,
+                      "URL": url}
+                # WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.CLASS_NAME, "laws-body")))
+                logging.info(f"Processing URL: {url}")
+                lawHeader = driver.find_element(By.CLASS_NAME, "laws-header")
+                lawBody = driver.find_element(By.CLASS_NAME, "laws-body")
+                section = lawHeader.find_element(By.TAG_NAME, "h1").text
+                logging.info(f"Section: {section}")
+                result["Section"] = section
+                result["Section_italic"] = ""
+                # result["Section_italic"] = lawBody.find_element(By.CLASS_NAME, "laws-notice").text
+                law_p = lawBody.find_elements(By.TAG_NAME, "p")
+                law_text = ""
+                for breadcrumb in lawHeader.find_elements(By.CLASS_NAME, "breadcrumbs-node"):
+                    if breadcrumb.text.startswith("Ohio Revised Code"):
+                        result["Code"] = breadcrumb.text
+                        logging.info(f"Code: {breadcrumb.text}")
+                    elif breadcrumb.text.startswith("Ohio Constitution"):
+                        result["Code"] = breadcrumb.text
+                        logging.info(f"Code: {breadcrumb.text}")
+                    elif breadcrumb.text.startswith("Ohio Administrative Code"):
+                        result["Code"] = breadcrumb.text
+                        logging.info(f"Code: {breadcrumb.text}")
+                    elif breadcrumb.text.startswith("Title"):
+                        result["Title"] = breadcrumb.text
+                        result["Title_italic"] = ""
+                        logging.info(f"Title: {breadcrumb.text}")
+                    elif breadcrumb.text.startswith("Chapter"):
+                        result["Chapter"] = breadcrumb.text
+                        result["Chapter_italic"] = ""
+                        logging.info(f"Chapter: {breadcrumb.text}")
+                    elif breadcrumb.text.startswith("Article"):
+                        result["Article"] = breadcrumb.text
+                        result["Article_italic"] = ""
+                        logging.info(f"Article: {breadcrumb.text}")
+                for law_i, paragraph in enumerate(law_p):   
+                    logging.info(f"Law: {paragraph.text}")                 
+                    if law_i == 0:
+                        law_text = paragraph.text
+                    else:
+                        law_text += "\n" + paragraph.text
+                result["Law"] = law_text
+                self.insert_law_entry(self.db_file, result)
+            except Exception as e2:
+                print("\n" + url + "\n")
+                logging.error(f"Error {url} {e2}")
+        finally:
+            self.driver_pool.release_driver(driver)
+        return law_links
+    
     def display_timer(self, state):
         # Print the static part of the message once, outside the loop
         print(f"Press ctl+c to exit... Scraping {state} code")
@@ -305,63 +397,7 @@ class SeleniumScraper:
         print()
 
     def start_scraping(self):
-        urls_to_scrape = self.base_urls
-        timer_thread = threading.Thread(target=partial(self.display_timer, "California"))
-        timer_thread.start()
-
-        manylaw_futures = set()
-
-        while urls_to_scrape:
-            futures = {self.executor.submit(self.scrape_url, url): url for url in urls_to_scrape}
-            urls_to_scrape = []
-
-            for future in as_completed(futures):
-                expanded_links, manylaw_links = future.result()
-                self.law_section_links.update(manylaw_links - self.law_section_links)
-                new_links = expanded_links - self.visited_links
-                self.visited_links.update(new_links)
-                urls_to_scrape.extend(new_links)
-
-                # links_to_remove = set()
-                for manylaw_link in manylaw_links:
-                    if manylaw_link not in self.processed_manylaw_links:
-                        manylaw_future = self.manylaw_executor.submit(self.scrape_manylawsections, manylaw_link)
-                        manylaw_futures.add(manylaw_future) 
-                        self.processed_manylaw_links.add(manylaw_link)
-                        # links_to_remove.add(manylaw_link)
-
-                # manylaw_links -= links_to_remove
-
-        # Check if any future is still running
-        while not self.stop_event.is_set():
-            # Get the count of futures that are not done
-            running_tasks = [f for f in manylaw_futures if not f.done()]
-            if not running_tasks:
-                break  # Exit the loop if no tasks are running
-            logging.info(f"Waiting for {len(running_tasks)} tasks to complete...")
-            for i, task in enumerate(running_tasks, start=1):
-                logging.debug(f"Task {i}/{len(running_tasks)} is still running.")
-            time.sleep(1)  # Wait for a bit before checking again
-
-        logging.info("All tasks have been completed.")
-        self.manylaw_executor.shutdown(wait=True)
-        timer_thread.join()
-        self.stop_event.set()
-        print("\nScraping completed")
-        logging.info("Scraping done")
-        logging.info(f"Law section links: {self.law_section_links}")
-
-
-if __name__ == "__main__":
-    log_file_name = f"scrape_log_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.log"
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(message)s',
-                        handlers=[logging.FileHandler(log_file_name, 'a', 'utf-8')])
-
-    db_file = f"law_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.db"
-    jurisdiction="CA"
-    db.create_database(db_file)
-    urls = ["https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CIV",
+        self.base_urls = ["https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CIV",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CCP",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=COM",
@@ -391,5 +427,116 @@ if __name__ == "__main__":
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"]
-    scraper = SeleniumScraper(urls, db_file, jurisdiction)
-    scraper.start_scraping()
+        urls_to_scrape = self.base_urls
+        timer_thread = threading.Thread(target=partial(self.display_timer, "California"))
+        timer_thread.start()
+
+        manylaw_futures = set()
+
+        while urls_to_scrape:
+            futures = {self.executor.submit(self.scrape_url, url): url for url in urls_to_scrape}
+            urls_to_scrape = []
+
+            for future in as_completed(futures):
+                expanded_links, manylaw_links = future.result()
+                self.law_section_links.update(manylaw_links - self.law_section_links)
+                new_links = expanded_links - self.visited_links
+                self.visited_links.update(new_links)
+                urls_to_scrape.extend(new_links)
+
+                for manylaw_link in manylaw_links:
+                    if manylaw_link not in self.processed_manylaw_links:
+                        manylaw_future = self.manylaw_executor.submit(self.scrape_manylawsections, manylaw_link)
+                        manylaw_futures.add(manylaw_future) 
+                        self.processed_manylaw_links.add(manylaw_link)
+
+        # Check if any future is still running
+        while not self.stop_event.is_set():
+            # Get the count of futures that are not done
+            running_tasks = [f for f in manylaw_futures if not f.done()]
+            if not running_tasks:
+                break  # Exit the loop if no tasks are running
+            logging.info(f"Waiting for {len(running_tasks)} tasks to complete...")
+            for i, task in enumerate(running_tasks, start=1):
+                logging.debug(f"Task {i}/{len(running_tasks)} is still running.")
+            time.sleep(1)  # Wait for a bit before checking again
+
+        logging.info("All tasks have been completed.")
+        self.manylaw_executor.shutdown(wait=True)
+        timer_thread.join()
+        self.stop_event.set()
+        print("\nScraping completed")
+        logging.info("Scraping done")
+        logging.info(f"Law section links: {self.law_section_links}")
+
+    def start_scraping_ohio(self):
+        self.jurisdiction = "OH"
+        self.base_urls = ["https://codes.ohio.gov/ohio-constitution"]
+
+        urls_to_scrape = self.base_urls
+        timer_thread = threading.Thread(target=partial(self.display_timer, "Ohio"))
+        timer_thread.start()
+
+        while urls_to_scrape:
+            futures = {self.executor.submit(self.scrape_url_ohio, url): url for url in urls_to_scrape}
+            urls_to_scrape = []
+
+            for future in as_completed(futures):
+                expanded_links = future.result()
+                new_links = expanded_links - self.visited_links
+                self.visited_links.update(new_links)
+                urls_to_scrape.extend(new_links)
+        
+        self.base_urls = ["https://codes.ohio.gov/ohio-revised-code"]
+        urls_to_scrape = self.base_urls
+
+        while urls_to_scrape:
+            futures = {self.executor.submit(self.scrape_url_ohio, url): url for url in urls_to_scrape}
+            urls_to_scrape = []
+
+            for future in as_completed(futures):
+                expanded_links = future.result()
+                new_links = expanded_links - self.visited_links
+                self.visited_links.update(new_links)
+                urls_to_scrape.extend(new_links)
+        
+        self.base_urls = ["https://codes.ohio.gov/ohio-administrative-code"]
+        urls_to_scrape = self.base_urls
+
+        while urls_to_scrape:
+            futures = {self.executor.submit(self.scrape_url_ohio, url): url for url in urls_to_scrape}
+            urls_to_scrape = []
+
+            for future in as_completed(futures):
+                expanded_links = future.result()
+                new_links = expanded_links - self.visited_links
+                self.visited_links.update(new_links)
+                urls_to_scrape.extend(new_links)
+
+
+        logging.info("All tasks have been completed.")
+        timer_thread.join()
+        self.stop_event.set()
+        print("\nScraping completed")
+        logging.info("Scraping done")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Run the web scraper for different jurisdictions.')
+    parser.add_argument('--state', choices=['CA', 'OH'], required=True, help='The state to scrape: CA for California or OH for Ohio')
+    args = parser.parse_args()
+
+    log_file_name = f"scrape_log_{args.state}_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.log"
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
+                        handlers=[logging.FileHandler(log_file_name, 'a', 'utf-8')])
+
+    db_file = f"law_{args.state}_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.db"
+    jurisdiction = args.state
+    db.create_database(db_file)
+
+    scraper = SeleniumScraper(db_file, jurisdiction)
+    
+    if jurisdiction == "CA":
+        scraper.start_scraping()
+    elif jurisdiction == "OH":
+        scraper.start_scraping_ohio()
