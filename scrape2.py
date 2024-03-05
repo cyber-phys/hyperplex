@@ -146,7 +146,7 @@ class SeleniumScraper:
         self.base_urls = []
         self.visited_links = set()
         self.law_section_links = set()
-        self.executor = ThreadPoolExecutor(max_workers=10)
+        self.executor = ThreadPoolExecutor(max_workers=5)
         self.stop_event = threading.Event()
         self.driver_pool = WebDriverPool(max_size=200)
         self.db_file = db_file
@@ -249,9 +249,10 @@ class SeleniumScraper:
             elapsed_time = time.time() - start_time
             formatted_time = f"{elapsed_time:5.2f} seconds"
             links_count = len(self.law_section_links)
+            drivers_count = len(self.driver_pool.get_all_drivers())
             with self.n_entries_lock:
                 n_entries = self.n_entries_added
-            print(f"\rPress ctl+c to exit... Scraping {state} code | Elapsed Time: {formatted_time} | Law Section Links: {links_count} | Entries Added: {n_entries}", end="", flush=True)
+            print(f"\rScraping {state} | Elapsed Time: {formatted_time} | Law Section Links: {links_count} | Entries Added: {n_entries} | Drivers: {drivers_count}", end="", flush=True)
             time.sleep(1)
         print()
     
@@ -312,7 +313,7 @@ class CaliforniaScraper(SeleniumScraper):
         
     def start_scraping(self):
             urls_to_scrape = self.base_urls
-            timer_thread = threading.Thread(target=partial(self.display_timer, "California"))
+            timer_thread = threading.Thread(target=partial(self.display_timer, "CA"))
             timer_thread.start()
 
             manylaw_futures = set()
@@ -363,16 +364,17 @@ class CaliforniaScraper(SeleniumScraper):
             logging.info("Scraping done")
             logging.info(f"Law section links: {self.law_section_links}")
     
-    def scrape_manylawsections(self, url):
+    def scrape_manylawsections(self, url, driver=None):
         logging.info(f"Scraping manylawsections at URL: {url}")
-        driver = self.driver_pool.get_driver()
+        if driver is None:
+            driver = self.driver_pool.get_driver()
         try:
             driver.safe_get(url)
             WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "manylawsections")))
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
             
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
                 for future in as_completed(futures):
                     result = future.result()
@@ -381,7 +383,7 @@ class CaliforniaScraper(SeleniumScraper):
             logging.error(f"Exception in scrape_manylawsections for URL {url}: {e}")
             print(f"retrying url: {url}")
             # TODO we should handel this better
-            self.scrape_manylawsections(url)
+            self.scrape_manylawsections(url, driver)
         finally:
             self.driver_pool.release_driver(driver)
             logging.info(f"Finished scrape_manylawsections for URL: {url}")
