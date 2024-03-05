@@ -148,7 +148,7 @@ class SeleniumScraper:
         self.law_section_links = set()
         self.executor = ThreadPoolExecutor(max_workers=5)
         self.stop_event = threading.Event()
-        self.driver_pool = WebDriverPool(max_size=200)
+        self.driver_pool = WebDriverPool(max_size=30)
         self.db_file = db_file
         self.n_entries_added = 0
         self.n_entries_lock = threading.Lock()
@@ -374,7 +374,7 @@ class CaliforniaScraper(SeleniumScraper):
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
             
-            with ThreadPoolExecutor(max_workers=3) as executor:
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
                 for future in as_completed(futures):
                     result = future.result()
@@ -382,7 +382,6 @@ class CaliforniaScraper(SeleniumScraper):
         except Exception as e:
             logging.error(f"Exception in scrape_manylawsections for URL {url}: {e}")
             print(f"retrying url: {url}")
-            # TODO we should handel this better
             self.scrape_manylawsections(url, driver)
         finally:
             self.driver_pool.release_driver(driver)
