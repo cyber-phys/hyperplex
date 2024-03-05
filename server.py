@@ -5,7 +5,16 @@ import sqlite3
 from chatgpt_db_manager import connect_db, fetch_chats, fetch_topics, fetch_chat_topics, fetch_chat_links, fetch_conversations, fetch_predicted_chat_links
 
 app = Sanic("LexAid")
-app.config.CORS_ORIGINS = ["https://luc-g7-7500.taildd8a6.ts.net", "http://localhost:3000", "https://luc-g7-7500.taildd8a6.ts.net:8443", ]
+app.config.CORS_ORIGINS = [
+    "https://luc-g7-7500.taildd8a6.ts.net",
+    "http://10.0.0.119:3001",
+    "http://localhost:3001",
+    "http://localhost:3001/*",
+    "https://luc-g7-7500.taildd8a6.ts.net:8443",
+    "https://lexaid-ai.pages.dev/*",
+    "https://lexaid-ai.pages.dev",
+    "https://lexaid-ai.pages.dev/api/search",
+]
 extend = Extend(app)
 
 chat_db_path = 'chat.db'
@@ -39,7 +48,7 @@ async def get_chat_links(request):
     conn.close()
     return response.json(chat_links)
 
-@app.get('/predicted_links')
+@app.get('/predicted_chat_links')
 async def get_predict_links(request):
     conn = connect_db(chat_db_path)
     predict_links = fetch_predicted_chat_links(conn)
@@ -77,6 +86,7 @@ async def user_labels_handler(request):
                 description: The name of the user label.
     """
     labels = get_user_labels(law_db_path)
+    print(labels)
     return response.json(labels)
 
 @app.post("/add_user_label")
@@ -265,10 +275,16 @@ async def search_handler(request):
                 type: integer
                 description: The number of top similar entries to return.
                 default: 5
-              label:
-                type: string
-                description: The label associated with the law entry.
-                default: None
+              includedLabels:
+                type: array
+                items:
+                  type: string
+                description: List of label_uuids to include in the search.
+              excludedLabels:
+                type: array
+                items:
+                  type: string
+                description: List of label_uuids to exclude from the search.
     responses:
       '200':
         description: A list of similar entries based on the query, with additional details for each entry.
@@ -312,35 +328,13 @@ async def search_handler(request):
     model_name = body.get("model_name", "")
     query = body.get("query", "")
     top_k = body.get("top_k", 5)
-    label = body.get("label", None) 
+    included_labels = body.get("includedLabels", [])
+    excluded_labels = body.get("excludedLabels", [])
 
-    print(f"Top K Search:\nModel Name: {model_name}, Query: {query}, Top K: {top_k}, Label: {label}")
+    print(f"Search:\nModel Name: {model_name}, Query: {query}, Top K: {top_k}, Included Labels: {included_labels}, Excluded Labels: {excluded_labels}")
     
-    similar_entries = perform_search(law_db_path, model_name, query, top_k, label)
-    # Fetch the text for each similar entry
-    # conn = sqlite3.connect(law_db_path)
-    # cursor = conn.cursor()
-    # detailed_entries = []
-    # for law_entry_uuid, score, char_start, char_end in similar_entries:
-    #     cursor.execute("""
-    #         SELECT text, char_start, char_end, code, section, amended, url 
-    #         FROM law_entries 
-    #         JOIN embeddings ON law_entries.uuid = embeddings.law_entry_uuid 
-    #         WHERE law_entries.uuid = ?
-    #     """, (law_entry_uuid,))
-    #     entry = cursor.fetchone()
-    #     detailed_entries.append({
-    #         'law_entry_uuid': law_entry_uuid,
-    #         'score': score,
-    #         'text': entry[0],
-    #         'char_start': char_start,
-    #         'char_end': char_end,
-    #         'code': entry[3],
-    #         'section': entry[4],
-    #         'amended': entry[5],
-    #         'url': entry[6]
-    #     })
-    # conn.close()
+    similar_entries = perform_search(law_db_path, model_name, query, top_k, included_labels, excluded_labels)
+
     uuids = [entry[0] for entry in similar_entries]
 
     # Fetch the text for each similar entry using a single query
@@ -349,9 +343,9 @@ async def search_handler(request):
 
     # Use a parameterized query with `WHERE IN` to get all entries at once
     query = f"""
-        SELECT law_entries.uuid, text, char_start, char_end, code, section, amended, url 
+        SELECT law_entries.uuid, text, char_start, char_end, url 
         FROM law_entries 
-        JOIN embeddings ON law_entries.uuid = embeddings.law_entry_uuid 
+        JOIN embeddings ON law_entries.uuid = embeddings.text_uuid 
         WHERE law_entries.uuid IN ({','.join('?' for _ in uuids)})
     """
     cursor.execute(query, uuids)
@@ -371,10 +365,10 @@ async def search_handler(request):
                 'text': entry[0],
                 'char_start': char_start,
                 'char_end': char_end,
-                'code': entry[3],
-                'section': entry[4],
-                'amended': entry[5],
-                'url': entry[6]
+                'code': "",
+                'section': "",
+                'amended': "",
+                'url': entry[3]
             })
     conn.close()
     return response.json(detailed_entries)
