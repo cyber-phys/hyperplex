@@ -267,35 +267,35 @@ class CaliforniaScraper(SeleniumScraper):
         self.manylaw_executor = ThreadPoolExecutor(max_workers=5)
         self.base_urls = [
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CIV",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CCP",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=COM",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CORP",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EDC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=ELEC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EVID",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAM",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FIN",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FGC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=GOV",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HNC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HSC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=INS",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=LAB",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=MVC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PEN",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PROB",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PCC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PRC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PUC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=RTC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=SHC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=UIC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=VEH",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CCP",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=COM",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CORP",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EDC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=ELEC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EVID",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAM",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FIN",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FGC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=GOV",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HNC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HSC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=INS",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=LAB",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=MVC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PEN",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PROB",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PCC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PRC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PUC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=RTC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=SHC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=UIC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=VEH",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"
             ]
         
     def start_scraping(self):
@@ -322,15 +322,15 @@ class CaliforniaScraper(SeleniumScraper):
                     #         manylaw_futures.add(manylaw_future) 
                     #         self.processed_manylaw_links.add(manylaw_link)
 
-            print(f"Found {len(law_section_links)} law section links")
-            law_section_links = self.law_section_links - self.visited_links
-            print(f"Processing {len(law_section_links)} law section links")
+            logging.info(f"Found {len(self.law_section_links)} law section links")
+            law_section_links_toprocess = self.law_section_links - self.visited_links
+            logging.info(f"Processing {len(law_section_links_toprocess)} law section links")
 
-            futures = {self.executor.submit(self.scrape_manylawsections, url): url for url in law_section_links}
+            futures = {self.executor.submit(self.scrape_manylawsections, url): url for url in self.law_section_links}
 
             for future in as_completed(futures):
                 future_url = future.result()
-                print(f"Processed {future_url}")
+                logging.info(f"Processed {future_url}")
 
             # # Check if any future is still running
             # while not self.stop_event.is_set():
@@ -619,9 +619,132 @@ class OhioScraper(SeleniumScraper):
             self.driver_pool.release_driver(driver)
         return law_links
 
+class FloridaScraper(SeleniumScraper):
+    def __init__(self, db_file):
+        super().__init__(db_file, jurisdiction="FL")
+        self.executor = ThreadPoolExecutor(max_workers=10)
+        self.base_urls = [
+            # Add the base URLs for Florida's legal code sections here
+            "http://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&Search_String=&URL=0000-0099/0061/Sections/0061.0401.html",
+            "http://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&Search_String=&URL=0000-0099/0046/Sections/0046.041.html",
+            "http://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&Search_String=&URL=0000-0099/0046/Sections/0046.011.html"
+        ]
+
+    def start_scraping(self):
+        urls_to_scrape = self.base_urls
+        # timer_thread = threading.Thread(target=partial(self.display_timer, "Florida"))
+        # timer_thread.start()
+
+        for url in urls_to_scrape:
+            self.scrape_law(url)
+
+        # while urls_to_scrape:
+        #     futures = {self.executor.submit(self.scrape_url, url): url for url in urls_to_scrape}
+        #     urls_to_scrape = []
+
+        #     for future in as_completed(futures):
+        #         expanded_links = future.result()
+        #         new_links = expanded_links - self.visited_links
+        #         self.visited_links.update(new_links)
+        #         urls_to_scrape.extend(new_links)
+
+        logging.info("All tasks have been completed.")
+        # timer_thread.join()
+        # self.stop_event.set()
+        # print("\nScraping completed")
+        # logging.info("Scraping done")
+    
+    def scrape_law(self, url):
+        """
+        Scrapes a law page from the Florida legal code website using a WebDriver from the pool.
+
+        Args:
+            url (str): The URL of the law page to scrape.
+        """
+        driver = self.driver_pool.get_driver()
+
+        try:
+            driver.safe_get(url)
+
+            # Wait until the page is loaded
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+
+            def get_text_by_xpath(xpath_list):
+                for xpath in xpath_list:
+                    elements = driver.find_elements(By.XPATH, xpath)
+                    if elements:
+                        return " ".join([element.text.strip() for element in elements])
+                return "\n"
+
+            section = get_text_by_xpath(["//span[contains(@class,'SectionNumber')]"])
+            section_title = get_text_by_xpath(["//span[contains(@class,'CatchlineText')]"])
+            law_xpaths = [
+                "//div[contains(@class,'SectionBody')]//span[contains(@class,'Text')]",
+                "//div[@class='Section']//div[contains(@class,'Subsection')]" 
+            ]
+            law = " ".join([get_text_by_xpath([law_xpath]) for law_xpath in law_xpaths])
+            title = get_text_by_xpath(["//a[contains(@href, 'Title_Request')]", "//b[contains(text(),'Title')]/following-sibling::a"])
+            title_name_xpaths = [
+                "//a[contains(@href, 'Title_Request')]/../following-sibling::*",
+                "//b[contains(text(),'Title')]/following-sibling::*",
+                "//a[contains(@href, 'Title_Request')]/../../following-sibling::font",  # Based on new structure
+            ]
+            title_name = get_text_by_xpath(title_name_xpaths)
+            chapter_xpaths = [
+                "//a[contains(@href, 'Chapter')]",
+                "//b[contains(text(),'Chapter')]/following-sibling::a",
+                "//*[@id='content']//a[contains(@href, 'Chapter')]"  # Add alternative XPaths for chapters here
+            ]
+            chapter = get_text_by_xpath(chapter_xpaths)
+            chapter_name_xpaths = [
+                "//a[contains(@href, 'Chapter')]/../following-sibling::*",
+                "//b[contains(text(),'Chapter')]/following-sibling::*",
+                "//*[@id='content']/div/table/tbody/tr[2]/td[2]/table/tbody/tr[1]/td/table/tbody/tr/td[2]/font/center"  # New XPath from user
+            ]
+            chapter_name = get_text_by_xpath(chapter_name_xpaths)
+            history = get_text_by_xpath(["//span[contains(@class,'HistoryText')]"])
+
+            # Print extracted data
+            print(f"Section: {section}")
+            print(f"Section Title: {section_title}")
+            print(f"Law: {law}")
+            print(f"Title: {title}")
+            print(f"Title Name: {title_name}")
+            print(f"Chapter: {chapter}")
+            print(f"Chapter Name: {chapter_name}")
+            print(f"History: {history}")
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+        finally:
+            self.driver_pool.release_driver(driver)
+
+    def scrape_url(self, url):
+        if self.stop_event.is_set():
+            return set()
+        
+        logging.info(f"Scraping URL: {url}")
+        driver = self.driver_pool.get_driver()
+        expanded_links = set()
+        try:
+            driver.safe_get(url)
+            # Add logic to extract links from the page
+            # This will depend on the structure of Florida's legal code website
+            # For example:
+            # elements = driver.find_elements(By.XPATH, "//a[contains(@href, '/Statutes/')]")
+            # expanded_links = {element.get_attribute("href") for element in elements}
+        except Exception as e:
+            logging.error(f"Error scraping URL {url}: {e}")
+        finally:
+            self.driver_pool.release_driver(driver)
+        return expanded_links
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run the web scraper for different jurisdictions.')
-    parser.add_argument('--state', choices=['CA', 'OH'], required=True, help='The state to scrape: CA for California or OH for Ohio')
+    parser.add_argument('--state', choices=['CA', 'OH', "FL"], required=True, help='The state to scrape: CA for California or OH for Ohio')
     args = parser.parse_args()
 
     log_file_name = f"scrape_log_{args.state}_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.log"
@@ -638,4 +761,7 @@ if __name__ == "__main__":
         scraper.start_scraping()
     elif jurisdiction == "OH":
         scraper = OhioScraper(db_file)
+        scraper.start_scraping()
+    elif jurisdiction == "FL":
+        scraper = FloridaScraper(db_file)
         scraper.start_scraping()
