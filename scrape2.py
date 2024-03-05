@@ -76,7 +76,7 @@ class CustomWebDriver(Chrome):
                 return  # If successful, exit the function
             except Exception as e:
                 if current_attempt > 3:
-                    print(f"Attempt {current_attempt} failed with error: {e}")
+                    logging.Error(f"Error Webdriver attempt {current_attempt} failed with error: {e}")
                 if current_attempt == attempts:
                     raise  # Reraise the last exception if out of attempts
                 current_attempt += 1
@@ -242,10 +242,8 @@ class SeleniumScraper:
         Starts the scraping process. This method should be overridden by subclasses.
         """
         pass
-    
+
     def display_timer(self, state):
-        # Print the static part of the message once, outside the loop
-        print(f"Press ctl+c to exit... Scraping {state} code")
         start_time = time.time()
         while not self.stop_event.is_set():
             elapsed_time = time.time() - start_time
@@ -253,12 +251,26 @@ class SeleniumScraper:
             links_count = len(self.law_section_links)
             with self.n_entries_lock:
                 n_entries = self.n_entries_added
-            # Clear the dynamic content line using ANSI escape code and update it
-            # This assumes the cursor is already on the line to be cleared
-            print(f"\r\033[KElapsed Time: {formatted_time} | Law Section Links: {links_count} | Entries Added: {n_entries}", end="")
+            print(f"\rPress ctl+c to exit... Scraping {state} code | Elapsed Time: {formatted_time} | Law Section Links: {links_count} | Entries Added: {n_entries}", end="", flush=True)
             time.sleep(1)
-        # Ensure there's a newline at the end when the loop exits
         print()
+    
+    # def display_timer(self, state):
+    #     # Print the static part of the message once, outside the loop
+    #     print(f"Press ctl+c to exit... Scraping {state} code")
+    #     start_time = time.time()
+    #     while not self.stop_event.is_set():
+    #         elapsed_time = time.time() - start_time
+    #         formatted_time = f"{elapsed_time:5.2f} seconds"
+    #         links_count = len(self.law_section_links)
+    #         with self.n_entries_lock:
+    #             n_entries = self.n_entries_added
+    #         # Clear the dynamic content line using ANSI escape code and update it
+    #         # This assumes the cursor is already on the line to be cleared
+    #         print(f"\r\033[KElapsed Time: {formatted_time} | Law Section Links: {links_count} | Entries Added: {n_entries}", end="")
+    #         time.sleep(1)
+    #     # Ensure there's a newline at the end when the loop exits
+    #     print()
 
 class CaliforniaScraper(SeleniumScraper):
     def __init__(self, db_file):
@@ -267,35 +279,35 @@ class CaliforniaScraper(SeleniumScraper):
         self.manylaw_executor = ThreadPoolExecutor(max_workers=5)
         self.base_urls = [
             "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CIV",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CCP",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=COM",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CORP",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EDC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=ELEC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EVID",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAM",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FIN",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FGC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=GOV",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HNC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HSC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=INS",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=LAB",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=MVC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PEN",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PROB",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PCC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PRC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PUC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=RTC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=SHC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=UIC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=VEH",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
-            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CCP",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=COM",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CORP",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EDC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=ELEC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EVID",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAM",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FIN",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FGC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=GOV",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HNC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HSC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=INS",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=LAB",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=MVC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PEN",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PROB",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PCC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PRC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PUC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=RTC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=SHC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=UIC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=VEH",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
+            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"
             ]
         
     def start_scraping(self):
