@@ -73,6 +73,7 @@ class CustomWebDriver(Chrome):
         current_attempt = 1
         while current_attempt <= attempts:
             try:
+                time.sleep(random.randint(1, 5))
                 self.get(url)
                 return  # If successful, exit the function
             except Exception as e:
@@ -112,7 +113,6 @@ class WebDriverPool:
         Returns:
         - WebDriver: An available WebDriver instance.
         """
-        time.sleep(random.randint(1, 5))
         self.semaphore.acquire()
         return self.available_drivers.get()
 
@@ -375,12 +375,17 @@ class CaliforniaScraper(SeleniumScraper):
             WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "manylawsections")))
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
+
+            for link in elements:
+                result = self.process_link(driver, link, url)
+                self.insert_law_entry(self.db_file, result)
             
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
-                for future in as_completed(futures):
-                    result = future.result()
-                    self.insert_law_entry(self.db_file, result)
+            # with ThreadPoolExecutor(max_workers=5) as executor:
+            #     futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
+            #     for future in as_completed(futures):
+            #         result = future.result()
+            #         self.insert_law_entry(self.db_file, result)
+
         except Exception as e:
             logging.error(f"Exception in scrape_manylawsections for URL {url}: {e}")
             print(f"retrying url: {url}")
@@ -404,9 +409,10 @@ class CaliforniaScraper(SeleniumScraper):
             self.driver_pool.release_driver(driver)
         return expanded_links, manylaw_links
 
-    def process_link(self, link, url):
+    def process_link(self, link, url, driver=None):
         """Process a single link and return details as a dictionary."""
-        driver = self.driver_pool.get_driver()
+        if driver is None:
+            driver = self.driver_pool.get_driver()
         try:
             driver.safe_get(url)
             js_code = link.split(":", 1)[1] if ":" in link else link
