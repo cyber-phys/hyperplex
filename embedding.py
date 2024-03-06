@@ -799,16 +799,16 @@ def search_embeddings(conn, query_embedding: torch.Tensor, model_name: str, top_
         exclude_condition = f"LEFT JOIN text_label_link tll_excluded ON e.text_uuid = tll_excluded.text_uuid AND tll_excluded.label_uuid IN ({placeholders})"
         params.extend(excluded_labels)
 
-    # params.append(model_uuid)
+    params.append(model_uuid)
 
-    # # Prepare the SQL query
-    # query = f"""
-    #     SELECT e.text_uuid, e.embedding, e.char_start, e.char_end
-    #     FROM embeddings e
-    #     {include_condition}
-    #     {exclude_condition}
-    #     WHERE e.model_uuid = ?  -- Filter by model_uuid
-    # """
+    # Prepare the SQL query
+    query = f"""
+        SELECT e.text_uuid, e.embedding, e.char_start, e.char_end
+        FROM embeddings e
+        {include_condition}
+        {exclude_condition}
+        WHERE e.model_uuid = ?  -- Filter by model_uuid
+    """
 
     where_clauses = []
     if excluded_labels:
