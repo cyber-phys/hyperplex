@@ -18,6 +18,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import argparse
 from selenium.webdriver import Chrome
 from abc import abstractmethod
+import random
 
 class CustomWebDriver(Chrome):
     """
@@ -111,6 +112,7 @@ class WebDriverPool:
         Returns:
         - WebDriver: An available WebDriver instance.
         """
+        time.sleep(random.randint(1, 5))
         self.semaphore.acquire()
         return self.available_drivers.get()
 
@@ -148,7 +150,7 @@ class SeleniumScraper:
         self.law_section_links = set()
         self.executor = ThreadPoolExecutor(max_workers=5)
         self.stop_event = threading.Event()
-        self.driver_pool = WebDriverPool(max_size=30)
+        self.driver_pool = WebDriverPool(max_size=200)
         self.db_file = db_file
         self.n_entries_added = 0
         self.n_entries_lock = threading.Lock()
