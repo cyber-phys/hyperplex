@@ -73,7 +73,7 @@ class CustomWebDriver(Chrome):
         current_attempt = 1
         while current_attempt <= attempts:
             try:
-                time.sleep(random.randint(1, 5))
+                time.sleep(random.randint(0, 5))
                 self.get(url)
                 return  # If successful, exit the function
             except Exception as e:
@@ -148,7 +148,7 @@ class SeleniumScraper:
         self.base_urls = []
         self.visited_links = set()
         self.law_section_links = set()
-        self.executor = ThreadPoolExecutor(max_workers=5)
+        self.executor = ThreadPoolExecutor(max_workers=10)
         self.stop_event = threading.Event()
         self.driver_pool = WebDriverPool(max_size=200)
         self.db_file = db_file
@@ -377,7 +377,7 @@ class CaliforniaScraper(SeleniumScraper):
             elements = element.find_elements(By.TAG_NAME, 'a')
 
             for link in elements:
-                result = self.process_link(driver, link, url)
+                result = self.process_link(link.get_attribute("href"), url, driver)
                 self.insert_law_entry(self.db_file, result)
             
             # with ThreadPoolExecutor(max_workers=5) as executor:
