@@ -15,9 +15,18 @@ def connect_db(db_file):
     except Error as e:
         print(f"Error connecting to database: {e}")
         return None
+    
+def disconnect_db(conn):
+    """Close the connection to the SQLite database."""
+    try:
+        conn.close()
+        print("Database connection closed successfully.")
+    except Error as e:
+        print(f"Error closing database connection: {e}")
 
-def execute_sql(conn, sql, params=None, commit=False, fetchone=False, fetchall=False):
-    """Execute SQL commands with optional commit and fetchone, now supports SQL parameters."""
+
+def execute_sql(conn, sql, params=None, commit=False, fetchone=False, fetchall=False, return_cursor=False):
+    """Execute SQL commands with optional commit, fetchone, fetchall, and return cursor."""
     try:
         c = conn.cursor()
         if params:
@@ -30,6 +39,8 @@ def execute_sql(conn, sql, params=None, commit=False, fetchone=False, fetchall=F
             return c.fetchone()
         if fetchall:
             return c.fetchall()
+        if return_cursor:
+            return c
     except Error as e:
         print(f"Error executing SQL: {e}")
         if "UNIQUE constraint failed" in str(e):
@@ -44,26 +55,24 @@ def create_database(db_file):
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS law_entries (
                 uuid TEXT PRIMARY KEY,
-                code TEXT,
-                title TEXT,
-                title_italic TEXT,
-                division TEXT,
-                division_italic TEXT,
-                part TEXT,
-                part_italic TEXT,
-                chapter TEXT,
-                chapter_italic TEXT,
-                article TEXT,
-                article_italic TEXT,
-                section TEXT,
-                section_italic TEXT,
-                provisions TEXT,
-                provisions_italic TEXT,
                 text TEXT,
-                text_italic TEXT,
-                url TEXT
+                url TEXT,
+                creation_time TEXT
             );
         ''')
+
+        # Law Entries Structure  
+        execute_sql(conn, '''
+            CREATE TABLE IF NOT EXISTS law_structure (
+                uuid TEXT PRIMARY KEY,
+                type TEXT CHECK(type IN ('jurisdiction', 'code', 'division', 'part', 'title', 'chapter', 'article', 'provision', 'section')),
+                text TEXT,
+                text_italic TEXT,
+                child_uuid TEXT,
+                law_uuid TEXT,
+                FOREIGN KEY(law_uuid) REFERENCES law_entries(uuid)
+            );
+        ''')   
 
         # PDF Entries Table
         execute_sql(conn, '''
@@ -72,7 +81,8 @@ def create_database(db_file):
                 title TEXT,
                 text TEXT,
                 type TEXT,
-                url TEXT
+                url TEXT,
+                creation_time TEXT
             );
         ''')
 
@@ -87,19 +97,20 @@ def create_database(db_file):
             );
         ''')
 
-        #TODO make this work with chats and pdfs
         # Table for embeddings 
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS embeddings (
                 uuid TEXT PRIMARY KEY,
                 model_uuid TEXT NOT NULL,
-                law_entry_uuid TEXT NOT NULL,
+                text_uuid TEXT NOT NULL,
                 creation_time TEXT NOT NULL,
                 char_start INTEGER NOT NULL,
                 char_end INTEGER NOT NULL,
                 embedding BLOB NOT NULL,
                 FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid),
-                FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid)
+                FOREIGN KEY(text_uuid) REFERENCES law_entries(uuid),
+                FOREIGN KEY(text_uuid) REFERENCES pdf_entries(uuid),
+                FOREIGN KEY(text_uuid) REFERENCES chats(uuid)
             );
         ''')
 
@@ -109,10 +120,14 @@ def create_database(db_file):
             CREATE TABLE IF NOT EXISTS labels (
                 label_uuid TEXT UNIQUE,
                 label TEXT NOT NULL,
+                description TEXT,
+                gnn_label TEXT,
                 creation_time TEXT NOT NULL,
                 color TEXT DEFAULT 'blue',
                 is_user_label BOOLEAN NOT NULL DEFAULT 0,
-                bert_id INTEGER PRIMARY KEY AUTOINCREMENT
+                is_cluster_label BOOLEAN NOT NULL DEFAULT 0,
+                bert_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT CHECK(type IN ('chat', 'pdf', 'law'))
             );
         ''')
 
@@ -140,34 +155,37 @@ def create_database(db_file):
             );
         ''')
 
-        #TODO: make general and merge with pdf and chats
-        # Table that links law embeddings to a label
-        execute_sql(conn, '''
-            CREATE TABLE IF NOT EXISTS label_embeddings (
-                label_uuid TEXT NOT NULL,
-                law_entry_uuid TEXT NOT NULL,
-                creation_time TEXT NOT NULL,
-                char_start INTEGER NOT NULL,
-                char_end INTEGER NOT NULL,
-                embedding BLOB NOT NULL,
-                model_uuid TEXT NOT NULL,
-                FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
-                FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid),
-                FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid)
-            );
-        ''')
+        # #TODO: make general and merge with pdf and chats
+        # # Table that links law embeddings to a label
+        # execute_sql(conn, '''
+        #     CREATE TABLE IF NOT EXISTS label_embeddings (
+        #         label_uuid TEXT NOT NULL,
+        #         law_entry_uuid TEXT NOT NULL,
+        #         creation_time TEXT NOT NULL,
+        #         char_start INTEGER NOT NULL,
+        #         char_end INTEGER NOT NULL,
+        #         embedding BLOB NOT NULL,
+        #         model_uuid TEXT NOT NULL,
+        #         FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
+        #         FOREIGN KEY(law_entry_uuid) REFERENCES law_entries(uuid),
+        #         FOREIGN KEY(model_uuid) REFERENCES nlp_model(uuid)
+        #     );
+        # ''')
 
-        #TODO: make general for use with pdfs and chats
-        # Table that links user labels to specific laws + label meta data
+        # Table that links user labels to specific laws/pdf/chat + label meta data
         execute_sql(conn, '''
-            CREATE TABLE IF NOT EXISTS user_label_texts (
+            CREATE TABLE IF NOT EXISTS text_label_link (
                 label_uuid TEXT NOT NULL,
                 text_uuid TEXT NOT NULL,
                 creation_time TEXT NOT NULL,
                 char_start INTEGER NOT NULL,
                 char_end INTEGER NOT NULL,
+                ai_created BOOLEAN DEFAULT 0,
+                positive_example BOOLEAN DEFAULT 1,
                 FOREIGN KEY(label_uuid) REFERENCES labels(label_uuid),
-                FOREIGN KEY(text_uuid) REFERENCES law_entries(uuid)
+                FOREIGN KEY(text_uuid) REFERENCES law_entries(uuid),
+                FOREIGN KEY(text_uuid) REFERENCES pdf_entries(uuid),
+                FOREIGN KEY(text_uuid) REFERENCES chats(uuid)
             );
         ''')
 
@@ -185,7 +203,7 @@ def create_database(db_file):
         # Chats table
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS chats (
-                id TEXT UNIQUE PRIMARY KEY,
+                uuid TEXT UNIQUE PRIMARY KEY,
                 conversation_id TEXT,
                 content_type TEXT,
                 model TEXT,
@@ -203,9 +221,9 @@ def create_database(db_file):
         # Chat topics table
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS chat_topics (
-                chat_id TEXT,
+                chat_uuid TEXT,
                 topic_id INTEGER,
-                FOREIGN KEY (chat_id) REFERENCES chats(id),
+                FOREIGN KEY (chat_uuid) REFERENCES chats(uuid),
                 FOREIGN KEY (topic_id) REFERENCES topics(id)
             );
         ''')
@@ -213,11 +231,11 @@ def create_database(db_file):
         # Chat links table
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS chat_links (
-                source_chat_id TEXT,
-                target_chat_id TEXT,
+                source_chat_uuid TEXT,
+                target_chat_uuid TEXT,
                 topic_id INTEGER,
-                FOREIGN KEY (source_chat_id) REFERENCES chats(id),
-                FOREIGN KEY (target_chat_id) REFERENCES chats(id),
+                FOREIGN KEY (source_chat_uuid) REFERENCES chats(uuid),
+                FOREIGN KEY (target_chat_uuid) REFERENCES chats(uuid),
                 FOREIGN KEY (topic_id) REFERENCES topics(id)
             );
         ''')
@@ -246,11 +264,11 @@ def create_database(db_file):
         # Preicted chat links table
         execute_sql(conn, '''
             CREATE TABLE IF NOT EXISTS predicted_chat_links (
-                source_chat_id TEXT,
-                target_chat_id TEXT,
+                source_chat_uuid TEXT,
+                target_chat_uuid TEXT,
                 score REAL,
-                FOREIGN KEY (source_chat_id) REFERENCES chats(id),
-                FOREIGN KEY (target_chat_id) REFERENCES chats(id)
+                FOREIGN KEY (source_chat_uuid) REFERENCES chats(uuid),
+                FOREIGN KEY (target_chat_uuid) REFERENCES chats(uuid)
             );
         ''', commit=True)
 
@@ -265,7 +283,7 @@ def find_duplicate_law_entries(db_file):
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT text, COUNT(*) c FROM law_entries 
-                GROUP BY section, text, url
+                GROUP BY text, url
                 HAVING c > 1;
             ''')
             duplicates = cursor.fetchall()
@@ -290,8 +308,7 @@ def clear_labels(db_file):
             # Tables to clear
             tables_to_clear = [
                 'topics', 'cluster_label_link', 'chat_topics', 
-                'conversation_topics', 'topic_hierarchy', 
-                'label_embeddings', 'labels'
+                'conversation_topics', 'topic_hierarchy', 'labels'
             ]
             
             # Count entries before clearing
