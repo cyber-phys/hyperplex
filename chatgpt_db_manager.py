@@ -6,7 +6,7 @@ import uuid
 from typing import Dict, List, Tuple
 import pandas as pd
 import argparse
-from db import connect_db, execute_sql, create_database
+from db import connect_db, disconnect_db, execute_sql, create_database
 
 def parse_json(file_path):
     with open(file_path, 'r') as f:
@@ -107,7 +107,7 @@ def insert_conversations_and_chats(db_file, conversation_infos, all_chats):
             VALUES (?, ?, ?, ?, ?);
         '''
         insert_chat_sql = '''
-            INSERT INTO chats (id, conversation_id, content_type, model, message, author, create_time, status, recipient, parent, is_first_message)
+            INSERT INTO chats (uuid, conversation_id, content_type, model, message, author, create_time, status, recipient, parent, is_first_message)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         '''
 
@@ -117,7 +117,7 @@ def insert_conversations_and_chats(db_file, conversation_infos, all_chats):
         for chat in all_chats:
             execute_sql(conn, insert_chat_sql, (chat["id"], chat["conversation_id"], chat["content_type"], chat["model"], json.dumps(chat["message"]), chat["author"], chat["create_time"], chat["status"], chat["recipient"], chat["parent"], chat["is_first_message"]), commit=True)
 
-        conn.close()
+        disconnect_db(conn)
         print("Conversations and chats inserted successfully.")
 
 def fetch_table_data(conn, query):
@@ -145,9 +145,9 @@ def fetch_chats(conn):
         cursor = conn.cursor()
         # Modified SQL query to join chats with chat_topics and topics to fetch the topic name as label
         query = """
-        SELECT c.id, c.conversation_id, c.content_type, c.model, c.message, c.author, c.create_time, c.status, c.recipient, c.parent, c.is_first_message, t.name AS label
+        SELECT c.uuid, c.conversation_id, c.content_type, c.model, c.message, c.author, c.create_time, c.status, c.recipient, c.parent, c.is_first_message, t.name AS label
         FROM chats c
-        LEFT JOIN chat_topics ct ON c.id = ct.chat_id
+        LEFT JOIN chat_topics ct ON c.id = ct.chat_uuid
         LEFT JOIN topics t ON ct.topic_id = t.id
         """
         cursor.execute(query)
@@ -174,7 +174,7 @@ def fetch_chat_topics(conn):
     try:
         cursor = conn.cursor()
         query = """
-        SELECT ct.chat_id, ct.topic_id, t.name AS label
+        SELECT ct.chat_uuid, ct.topic_id, t.name AS label
         FROM chat_topics ct
         JOIN topics t ON ct.topic_id = t.id
         """
@@ -238,12 +238,12 @@ def fetch_chat_links(conn):
         # Modified SQL query to join chat_links with topics to fetch the topic name as label, and also join with chats to get the authors
         # and include the conversation_id of the source chat
         query = """
-        SELECT cl.source_chat_id, cl.target_chat_id, cl.topic_id, t.name AS label, sc.author AS source_author, 
+        SELECT cl.source_chat_uuid, cl.target_chat_uuid, cl.topic_id, t.name AS label, sc.author AS source_author, 
         tc.author AS target_author, sc.conversation_id AS source_conversation_id
         FROM chat_links cl
         JOIN topics t ON cl.topic_id = t.id
-        JOIN chats sc ON cl.source_chat_id = sc.id
-        JOIN chats tc ON cl.target_chat_id = tc.id
+        JOIN chats sc ON cl.source_chat_uuid = sc.uuid
+        JOIN chats tc ON cl.target_chat_uuid = tc.uuid
         """
         cursor.execute(query)
         chat_links = cursor.fetchall()
@@ -252,8 +252,8 @@ def fetch_chat_links(conn):
         result = [
             {
                 "id": str(uuid.uuid4()),
-                "source_chat_id": chat_link[0],
-                "target_chat_id": chat_link[1],
+                "source_chat_uuid": chat_link[0],
+                "target_chat_uuid": chat_link[1],
                 "topic_id": chat_link[2],
                 "label": chat_link[3],
                 "source_author": chat_link[4],
@@ -276,26 +276,26 @@ def fetch_predicted_chat_links(conn):
     - conn: The database connection object.
     
     Returns:
-    - A list of dictionaries, each representing a predicted chat link with 'source_chat_id', 'target_chat_id', and 'score'.
+    - A list of dictionaries, each representing a predicted chat link with 'source_chat_uuid', 'target_chat_uuid', and 'score'.
     """
     try:
         cursor = conn.cursor()
         query = """
-        SELECT source_chat_id, target_chat_id, score
+        SELECT source_chat_uuid, target_chat_uuid, score
         FROM predicted_chat_links
         """
         cursor.execute(query)
-        predicted_links = cursor.fetchall()
+        predicted_chat_links = cursor.fetchall()
         
         # Construct the result
         result = [
             {
                 "id": str(uuid.uuid4()),
-                "source_chat_id": link[0],
-                "target_chat_id": link[1],
+                "source_chat_uuid": link[0],
+                "target_chat_uuid": link[1],
                 "score": link[2]
             }
-            for link in predicted_links
+            for link in predicted_chat_links
         ]
         
         return result
@@ -303,26 +303,26 @@ def fetch_predicted_chat_links(conn):
         print(f"Error fetching predicted chat links: {e}")
         return []
     
-def fetch_conversation_id_for_chat(conn, chat_id):
+def fetch_conversation_id_for_chat(conn, chat_uuid):
     """
-    Fetch the conversation_id for a given chat_id from the database.
+    Fetch the conversation_id for a given chat_uuid from the database.
 
     Parameters:
     - conn: The database connection object.
-    - chat_id: The ID of the chat.
+    - chat_uuid: The ID of the chat.
 
     Returns:
     - The conversation_id as a string, or None if not found.
     """
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT conversation_id FROM chats WHERE id = ?", (chat_id,))
+        cursor.execute("SELECT conversation_id FROM chats WHERE uuid = ?", (chat_uuid,))
         result = cursor.fetchone()
         if result:
             return result[0]
         return None
     except Error as e:
-        print(f"Error fetching conversation_id for chat_id {chat_id}: {e}")
+        print(f"Error fetching conversation_id for chat_uuid {chat_uuid}: {e}")
         return None
     
 def fetch_conversations(conn):
@@ -332,20 +332,20 @@ def fetch_conversations(conn):
     query = "SELECT id, title, create_time, update_time, is_archived FROM conversations"
     return fetch_table_data(conn, query)
 
-def fetch_chat(conn, chat_id) -> Dict:
+def fetch_chat(conn, chat_uuid) -> Dict:
     """
     Fetch chat data by chat ID from the database and return it as a dictionary.
 
     Parameters:
     - conn: The database connection object.
-    - chat_id: The ID of the chat to fetch.
+    - chat_uuid: The ID of the chat to fetch.
 
     Returns:
     - A dictionary containing the chat data, or None if not found.
     """
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM chats WHERE id = ?", (chat_id,))
+        c.execute("SELECT * FROM chats WHERE uuid = ?", (chat_uuid,))
         row = c.fetchone()
         if row:
             columns = [col[0] for col in c.description]
@@ -367,20 +367,20 @@ def fetch_all_chats(conn) -> Dict[str, List]:
     Returns:
     - A dictionary with column names as keys and lists of column data as values.
     """
+    chat_history = {}
     try:
-        c = conn.cursor()
-        c.execute("SELECT * FROM chats")
+        select_chats_sql = "SELECT * FROM chats"
+        c = execute_sql(conn, select_chats_sql, return_cursor=True)
         rows = c.fetchall()
         if rows:
             columns = [col[0] for col in c.description]
             # Using a dictionary comprehension to create the desired structure
             # and map to aggregate the column data into lists
             chat_history = {column: [row[idx] for row in rows] for idx, column in enumerate(columns)}
-            return chat_history
-        return {}
     except Error as e:
         print(f"Error fetching all chat data: {e}")
-        return {}
+    
+    return chat_history
 
 def fetch_conversations_with_chats(conn) -> List[Dict]:
     """
@@ -397,44 +397,35 @@ def fetch_conversations_with_chats(conn) -> List[Dict]:
     """
     try:
         c = conn.cursor()
-        c.execute("SELECT * FROM chats ORDER BY conversation_id")
+        c.execute("SELECT * FROM chats ORDER BY conversation_id, create_time")
         rows = c.fetchall()
         
         # If no rows are fetched, return an empty list
         if not rows:
             return []
 
-        # Initialize a list to hold dictionaries for each conversation
-        conversations = []
-        current_conversation_id = None
-        conversation_dict = {}
-
+        # Initialize a dictionary to hold lists of chat data for each conversation
+        conversations = {}
+        
         for row in rows:
             columns = [col[0] for col in c.description]
             chat_dict = dict(zip(columns, row))
+            conversation_id = chat_dict['conversation_id']
+                        
+            # Initialize a dictionary for this conversation_id if it hasn't been already
+            if conversation_id not in conversations:
+                conversations[conversation_id] = {col: [] for col in columns}
             
-            # Check if we're still on the same conversation
-            if chat_dict['conversation_id'] != current_conversation_id:
-                # If not, and if we have a previous conversation, add it to the list
-                if conversation_dict:
-                    conversations.append(conversation_dict)
-                # Start a new conversation dictionary
-                current_conversation_id = chat_dict['conversation_id']
-                conversation_dict = {col: [] for col in columns}
-            
-            # Append data from the current row to the appropriate lists in the conversation_dict
+            # Append data from the current row to the appropriate lists in the conversation's dictionary
             for col in columns:
-                conversation_dict[col].append(chat_dict[col])
-        
-        # Don't forget to add the last conversation to the list
-        if conversation_dict:
-            conversations.append(conversation_dict)
+                conversations[conversation_id][col].append(chat_dict[col])
 
-        return conversations
+        # Convert the conversations dictionary to a list of dictionaries
+        return list(conversations.values())
     except Error as e:
         print(f"Error fetching conversations with chats: {e}")
         return []
-    
+
 def fetch_message_pairs(conn) -> Dict[str, List]:
     """
     Fetch all message pairs (parent and child messages) from the database and return
@@ -453,8 +444,8 @@ def fetch_message_pairs(conn) -> Dict[str, List]:
         # SQL query to join each chat with its parent and select the required attributes
         query = """
         SELECT
-            parent.id AS parent_id,
-            child.id AS child_id,
+            parent.uuid AS parent_uuid,
+            child.uuid AS child_uuid,
             child.conversation_id,
             child.create_time,
             parent.message || ' ' || child.message AS message,
@@ -464,7 +455,7 @@ def fetch_message_pairs(conn) -> Dict[str, List]:
             child.model AS child_model
         FROM
             chats AS child
-            INNER JOIN chats AS parent ON child.parent = parent.id
+            INNER JOIN chats AS parent ON child.parent = parent.uuid
         """
         c.execute(query)
         rows = c.fetchall()
@@ -473,8 +464,8 @@ def fetch_message_pairs(conn) -> Dict[str, List]:
         if rows:
             # Initialize keys with empty lists
             message_pairs = {
-                "parent_id": [],
-                "child_id": [],
+                "parent_uuid": [],
+                "child_uuid": [],
                 "conversation_id": [],
                 "creation_time": [],
                 "message": [],
@@ -486,8 +477,8 @@ def fetch_message_pairs(conn) -> Dict[str, List]:
 
             # Populate the lists with data from each row
             for row in rows:
-                message_pairs["parent_id"].append(row[0])
-                message_pairs["child_id"].append(row[1])
+                message_pairs["parent_uuid"].append(row[0])
+                message_pairs["child_uuid"].append(row[1])
                 message_pairs["conversation_id"].append(row[2])
                 message_pairs["creation_time"].append(row[3])
                 message_pairs["message"].append(row[4])
@@ -532,26 +523,26 @@ def insert_topics(conn, topic_names: List[str]):
         # Rollback in case of error
         conn.rollback()
 
-def insert_chat_topics(conn, chat_ids: List[str], topic_names: List[str]):
+def insert_chat_topics(conn, chat_uuids: List[str], topic_names: List[str]):
     """
-    Insert new chat topics into the chat_topics table. This function takes in a list of chat_ids and topic_names,
-    finds the matching topic_id for each topic_name, and inserts the chat_id and topic_id into the chat_topics table.
+    Insert new chat topics into the chat_topics table. This function takes in a list of chat_uuids and topic_names,
+    finds the matching topic_id for each topic_name, and inserts the chat_uuid and topic_id into the chat_topics table.
     If a topic_name does not exist in the topics table, it is inserted and its new topic_id is used.
 
     Parameters:
     - conn: The database connection object.
-    - chat_ids: A list of chat IDs.
+    - chat_uuids: A list of chat IDs.
     - topic_names: A list of topic names.
 
-    Note: The function assumes that the lists chat_ids and topic_names are of the same size.
+    Note: The function assumes that the lists chat_uuids and topic_names are of the same size.
     """
-    if len(chat_ids) != len(topic_names):
+    if len(chat_uuids) != len(topic_names):
         print("Error: The lists of chat IDs and topic names must be the same size.")
         return
 
     try:
         c = conn.cursor()
-        for chat_id, topic_name in zip(chat_ids, topic_names):
+        for chat_uuid, topic_name in zip(chat_uuids, topic_names):
             # Check if the topic exists and get its ID
             c.execute("SELECT id FROM topics WHERE name = ?", (topic_name,))
             topic_result = c.fetchone()
@@ -563,8 +554,8 @@ def insert_chat_topics(conn, chat_ids: List[str], topic_names: List[str]):
                 c.execute("INSERT INTO topics (name) VALUES (?)", (topic_name,))
                 topic_id = c.lastrowid  # Get the ID of the newly inserted topic
 
-            # Insert the chat_id and topic_id into chat_topics
-            c.execute("INSERT INTO chat_topics (chat_id, topic_id) VALUES (?, ?)", (chat_id, topic_id))
+            # Insert the chat_uuid and topic_id into chat_topics
+            c.execute("INSERT INTO chat_topics (chat_uuid, topic_id) VALUES (?, ?)", (chat_uuid, topic_id))
 
         conn.commit()
         print("Chat topics inserted successfully.")
@@ -572,28 +563,28 @@ def insert_chat_topics(conn, chat_ids: List[str], topic_names: List[str]):
         print(f"Error inserting chat topics: {e}")
         conn.rollback()
 
-def insert_chat_links(conn, source_chat_ids: List[str], target_chat_ids: List[str], topic_names: List[str]):
+def insert_chat_links(conn, source_chat_uuids: List[str], target_chat_uuids: List[str], topic_names: List[str]):
     """
-    Insert new chat links into the chat_links table. This function takes in lists of source_chat_ids, target_chat_ids,
-    and topic_names, finds the matching topic_id for each topic_name, and inserts the source_chat_id, target_chat_id,
+    Insert new chat links into the chat_links table. This function takes in lists of source_chat_uuids, target_chat_uuids,
+    and topic_names, finds the matching topic_id for each topic_name, and inserts the source_chat_uuid, target_chat_uuid,
     and topic_id into the chat_links table. If a topic_name does not exist in the topics table, it is inserted and its
     new topic_id is used.
 
     Parameters:
     - conn: The database connection object.
-    - source_chat_ids: A list of source chat IDs.
-    - target_chat_ids: A list of target chat IDs.
+    - source_chat_uuids: A list of source chat IDs.
+    - target_chat_uuids: A list of target chat IDs.
     - topic_names: A list of topic names.
 
-    Note: The function assumes that the lists source_chat_ids, target_chat_ids, and topic_names are of the same size.
+    Note: The function assumes that the lists source_chat_uuids, target_chat_uuids, and topic_names are of the same size.
     """
-    if not (len(source_chat_ids) == len(target_chat_ids) == len(topic_names)):
+    if not (len(source_chat_uuids) == len(target_chat_uuids) == len(topic_names)):
         print("Error: The lists of source chat IDs, target chat IDs, and topic names must be the same size.")
         return
 
     try:
         c = conn.cursor()
-        for source_chat_id, target_chat_id, topic_name in zip(source_chat_ids, target_chat_ids, topic_names):
+        for source_chat_uuid, target_chat_uuid, topic_name in zip(source_chat_uuids, target_chat_uuids, topic_names):
             # Check if the topic exists and get its ID
             c.execute("SELECT id FROM topics WHERE name = ?", (topic_name,))
             topic_result = c.fetchone()
@@ -605,8 +596,8 @@ def insert_chat_links(conn, source_chat_ids: List[str], target_chat_ids: List[st
                 c.execute("INSERT INTO topics (name) VALUES (?)", (topic_name,))
                 topic_id = c.lastrowid  # Get the ID of the newly inserted topic
 
-            # Insert the source_chat_id, target_chat_id, and topic_id into chat_links
-            c.execute("INSERT INTO chat_links (source_chat_id, target_chat_id, topic_id) VALUES (?, ?, ?)", (source_chat_id, target_chat_id, topic_id))
+            # Insert the source_chat_uuid, target_chat_uuid, and topic_id into chat_links
+            c.execute("INSERT INTO chat_links (source_chat_uuid, target_chat_uuid, topic_id) VALUES (?, ?, ?)", (source_chat_uuid, target_chat_uuid, topic_id))
 
         conn.commit()
         print("Chat links inserted successfully.")
@@ -754,20 +745,20 @@ def find_small_disjointed_conversation_links(conn):
     - conn: The database connection object.
     
     Returns:
-    - A list of RDF triples as strings, formatted as source_chat_id, source_author_to_target_author, target_chat_id.
+    - A list of RDF triples as strings, formatted as source_chat_uuid, source_author_to_target_author, target_chat_uuid.
     """
     try:
         c = conn.cursor()
         # Fetch chats that are the start of a conversation
-        c.execute("SELECT id, conversation_id, author FROM chats WHERE is_first_message = 1")
+        c.execute("SELECT uuid, conversation_id, author FROM chats WHERE is_first_message = 1")
         start_chats = c.fetchall()
 
         # Fetch chats that have no children
         c.execute("""
-            SELECT c.id, c.conversation_id, c.author 
+            SELECT c.uuid, c.conversation_id, c.author 
             FROM chats c
-            LEFT JOIN chat_links cl ON c.id = cl.source_chat_id
-            WHERE cl.source_chat_id IS NULL
+            LEFT JOIN chat_links cl ON c.uuid = cl.source_chat_uuid
+            WHERE cl.source_chat_uuid IS NULL
         """)
         leaf_chats = c.fetchall()
 
@@ -776,8 +767,8 @@ def find_small_disjointed_conversation_links(conn):
 
         # Group chats by conversation_id
         grouped_chats = {}
-        for chat_id, conversation_id, author in all_chats:
-            grouped_chats.setdefault(conversation_id, []).append((chat_id, author))
+        for chat_uuid, conversation_id, author in all_chats:
+            grouped_chats.setdefault(conversation_id, []).append((chat_uuid, author))
 
         # Generate all possible pairs of chats that are in different conversations
         rdf_triples = []
@@ -803,21 +794,21 @@ def find_disjoint_conversation_links(conn):
     - conn: The database connection object.
     
     Returns:
-    - A list of RDF triples as strings, formatted as source_chat_id, source_author_to_target_author, target_chat_id.
+    - A list of RDF triples as strings, formatted as source_chat_uuid, source_author_to_target_author, target_chat_uuid.
     """
     try:
         c = conn.cursor()
         # Fetch all chats with their conversation_id and author
-        c.execute("SELECT id, conversation_id, author FROM chats")
+        c.execute("SELECT uuid, conversation_id, author FROM chats")
         chats = c.fetchall()
 
         # Group chats by conversation_id
         grouped_chats = {}
         for chat in chats:
-            chat_id, conversation_id, author = chat
+            chat_uuid, conversation_id, author = chat
             if conversation_id not in grouped_chats:
                 grouped_chats[conversation_id] = []
-            grouped_chats[conversation_id].append((chat_id, author))
+            grouped_chats[conversation_id].append((chat_uuid, author))
 
         # Generate all possible pairs of chats that are in different conversations and have different authors
         rdf_triples = []
@@ -850,14 +841,14 @@ def generate_rdf_triples(conn):
     # Fetch chat links and generate triples
     chat_links = fetch_chat_links(conn)
     for link in chat_links:
-        triple = f"{link['source_chat_id']} {link['label']} {link['target_chat_id']}"
-        next_message_triple = f"{link['source_chat_id']} {link['source_author']}_to_{link['target_author']} {link['target_chat_id']}"
+        triple = f"{link['source_chat_uuid']} {link['label']} {link['target_chat_uuid']}"
+        next_message_triple = f"{link['source_chat_uuid']} {link['source_author']}_to_{link['target_author']} {link['target_chat_uuid']}"
         rdf_triples.extend([triple, next_message_triple])
 
     # Fetch chat topics and generate triples
     chat_topics = fetch_chat_topics(conn)
     for link in chat_topics:
-        triple = f"{link['label']} chat_type {link['chat_id']}"
+        triple = f"{link['label']} chat_type {link['chat_uuid']}"
         rdf_triples.append(triple)
 
     # Fetch topic links and generate triples
@@ -874,12 +865,12 @@ def insert_predicted_chat_links(conn, rdf_triples_with_scores):
     
     # Insert new data
     insert_sql = '''
-        INSERT INTO predicted_chat_links (source_chat_id, target_chat_id, score)
+        INSERT INTO predicted_chat_links (source_chat_uuid, target_chat_uuid, score)
         VALUES (?, ?, ?);
     '''
     for triple in rdf_triples_with_scores:
-        source_chat_id, label, target_chat_id, score = triple  # Directly unpack the tuple
-        execute_sql(conn, insert_sql, (source_chat_id, target_chat_id, float(score)), commit=True)
+        source_chat_uuid, label, target_chat_uuid, score = triple  # Directly unpack the tuple
+        execute_sql(conn, insert_sql, (source_chat_uuid, target_chat_uuid, float(score)), commit=True)
 
     print("Predicted chat links updated successfully.")
 
@@ -894,19 +885,19 @@ def find_disjoint_conversation_links_for_specific_conv(conn, specific_conv_id):
     - specific_conv_id: The ID of the specific conversation to compare against all others.
     
     Returns:
-    - A list of RDF triples as strings, formatted as source_chat_id, source_author_to_target_author, target_chat_id.
+    - A list of RDF triples as strings, formatted as source_chat_uuid, source_author_to_target_author, target_chat_uuid.
     """
     try:
         c = conn.cursor()
         # Fetch all chats with their conversation_id and author
-        c.execute("SELECT id, conversation_id, author FROM chats")
+        c.execute("SELECT uuid, conversation_id, author FROM chats")
         chats = c.fetchall()
 
         # Group chats by conversation_id
         grouped_chats = {}
         for chat in chats:
-            chat_id, conversation_id, author = chat
-            grouped_chats.setdefault(conversation_id, []).append((chat_id, author))
+            chat_uuid, conversation_id, author = chat
+            grouped_chats.setdefault(conversation_id, []).append((chat_uuid, author))
 
         # Ensure the specific conversation exists
         if specific_conv_id not in grouped_chats:
@@ -961,7 +952,7 @@ def find_disjoint_subcommand(args):
     else:
         print("Failed to connect to the database.")
 
-def insert_predicted_links_subcommand(args):
+def insert_predicted_chat_links_subcommand(args):
     conn = connect_db(args.db_file)
     if conn is not None:
         # Read the predicted links from the text file
@@ -979,11 +970,11 @@ def insert_predicted_links_subcommand(args):
 def fetch_conversation_id_subcommand(args):
     conn = connect_db(args.db_file)
     if conn is not None:
-        conversation_id = fetch_conversation_id_for_chat(conn, args.chat_id)
+        conversation_id = fetch_conversation_id_for_chat(conn, args.chat_uuid)
         if conversation_id:
-            print(f"Conversation ID for chat ID {args.chat_id}: {conversation_id}")
+            print(f"Conversation ID for chat ID {args.chat_uuid}: {conversation_id}")
         else:
-            print(f"No conversation found for chat ID {args.chat_id}")
+            print(f"No conversation found for chat ID {args.chat_uuid}")
     else:
         print("Failed to connect to the database.")
 
@@ -1027,14 +1018,14 @@ def main():
     disjoint_parser.add_argument("-o", "--output", help="Path to the output file for RDF triples.", default=None)
     disjoint_parser.set_defaults(func=find_disjoint_subcommand)
 
-    insert_links_parser = subparsers.add_parser('insert_predicted_links', help='Insert predicted chat links into the database.')
+    insert_links_parser = subparsers.add_parser('insert_predicted_chat_links', help='Insert predicted chat links into the database.')
     insert_links_parser.add_argument("db_file", help="Path to the SQLite database file.")
     insert_links_parser.add_argument("links_file", help="Path to the text file containing predicted links.")
-    insert_links_parser.set_defaults(func=insert_predicted_links_subcommand)
+    insert_links_parser.set_defaults(func=insert_predicted_chat_links_subcommand)
 
-    fetch_conversation_id_parser = subparsers.add_parser('fetch_conversation_id', help='Fetch the conversation_id for a given chat_id.')
+    fetch_conversation_id_parser = subparsers.add_parser('fetch_conversation_id', help='Fetch the conversation_id for a given chat_uuid.')
     fetch_conversation_id_parser.add_argument("db_file", help="Path to the SQLite database file.")
-    fetch_conversation_id_parser.add_argument("chat_id", help="The chat_id to fetch the conversation_id for.")
+    fetch_conversation_id_parser.add_argument("chat_uuid", help="The chat_uuid to fetch the conversation_id for.")
     fetch_conversation_id_parser.set_defaults(func=fetch_conversation_id_subcommand)
 
     specific_links_parser = subparsers.add_parser('find_specific_links', help='Find disjoint conversation links for a specific conversation.')

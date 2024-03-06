@@ -14,6 +14,9 @@ app.config.CORS_ORIGINS = [
     "https://lexaid-ai.pages.dev/*",
     "https://lexaid-ai.pages.dev",
     "https://lexaid-ai.pages.dev/api/search",
+    "https://lexaid.ai/*",
+    "https://lexaid.ai",
+    "https://lexaid.ai/api/search"
 ]
 extend = Extend(app)
 

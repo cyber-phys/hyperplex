@@ -62,14 +62,14 @@ def fetch_entries_with_user_labels_and_embeddings_chunk(db_path: str, model_uuid
         SELECT
             (SELECT COUNT(*)
             FROM embeddings e
-            INNER JOIN user_label_texts ult ON e.text_uuid = ult.text_uuid
+            INNER JOIN text_label_link ult ON e.text_uuid = ult.text_uuid
             WHERE e.model_uuid = ? AND (e.char_start <= ult.char_end AND e.char_end >= ult.char_start)
             ) +
             (SELECT COUNT(DISTINCT e.uuid)
             FROM embeddings e
             WHERE e.model_uuid = ? AND NOT EXISTS (
                 SELECT 1
-                FROM user_label_texts ult
+                FROM text_label_link ult
                 WHERE e.text_uuid = ult.text_uuid AND (e.char_start <= ult.char_end AND e.char_end >= ult.char_start)
             )
         ) AS total_count
@@ -91,7 +91,7 @@ def fetch_entries_with_user_labels_and_embeddings_chunk(db_path: str, model_uuid
            e.embedding
     FROM embeddings e
     INNER JOIN law_entries le ON e.text_uuid = le.uuid
-    LEFT JOIN user_label_texts ult ON e.text_uuid = ult.text_uuid AND e.char_start <= ult.char_end AND e.char_end >= ult.char_start
+    LEFT JOIN text_label_link ult ON e.text_uuid = ult.text_uuid AND e.char_start <= ult.char_end AND e.char_end >= ult.char_start
     LEFT JOIN labels l ON ult.label_uuid = l.label_uuid
     WHERE e.model_uuid = ?
     GROUP BY e.uuid, l.label
@@ -534,9 +534,9 @@ def insert_user_label_text(db_path: str, label_name: str, text_uuid: str, char_s
             VALUES (?, ?, 1, datetime('now'))
         """, (label_uuid, label_name))
     
-    # Insert the new label text into user_label_texts table
+    # Insert the new label text into text_label_link table
     cursor.execute("""
-        INSERT INTO user_label_texts (label_uuid, text_uuid, creation_time, char_start, char_end)
+        INSERT INTO text_label_link (label_uuid, text_uuid, creation_time, char_start, char_end)
         VALUES (?, ?, datetime('now'), ?, ?)
     """, (label_uuid, text_uuid, char_start, char_end))
 
@@ -761,10 +761,10 @@ def search_embeddings_by_similarity(conn, query_embedding: torch.Tensor, similar
 
     return similar_entries
 
-def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5, included_labels: list = None, excluded_labels: list = None):
+def search_embeddings(conn, query_embedding: torch.Tensor, model_name: str, top_k: int = 5, included_labels: list = None, excluded_labels: list = None):
     """
     Search the embeddings table for the top-k most similar entries to the query embedding.
-    Optionally filter the search to only include entries linked to specific labels.
+    Optionally filter the search to only include entries linked to specific labels and exclude certain labels.
 
     Args:
         conn: The database connection object.
@@ -777,35 +777,51 @@ def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5, inclu
         list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores.
     """
     cursor = conn.cursor()
-    
+    cursor.execute("SELECT uuid FROM nlp_model WHERE model = ?", (model_name,))
+    model_row = cursor.fetchone()
+    if not model_row:
+        print(f"No model found with name '{model_name}'.")
+        return []
+    model_uuid = model_row[0]
+
     # Build the SQL query dynamically based on included and excluded labels
-    label_conditions = []
+    include_condition = ""
+    exclude_condition = ""
+    params = []
+
     if included_labels:
         placeholders = ','.join('?' for _ in included_labels)
-        label_conditions.append(f"cll.label_uuid IN ({placeholders})")
+        include_condition = f"INNER JOIN text_label_link tll_included ON e.text_uuid = tll_included.text_uuid AND tll_included.label_uuid IN ({placeholders})"
+        params.extend(included_labels)
+
     if excluded_labels:
         placeholders = ','.join('?' for _ in excluded_labels)
-        label_conditions.append(f"cll.label_uuid NOT IN ({placeholders})")
-    
-    label_filter = ' AND '.join(label_conditions) if label_conditions else '1=1'
-    
-    cursor.execute(f"""
-        SELECT e.text_uuid, e.embedding, e.char_start, e.char_end
-        FROM embeddings e
-        LEFT JOIN cluster_label_link cll ON e.text_uuid = cll.text_uuid
-        WHERE {label_filter}
-    """, included_labels + excluded_labels if included_labels and excluded_labels else included_labels or excluded_labels or [])
+        exclude_condition = f"LEFT JOIN text_label_link tll_excluded ON e.text_uuid = tll_excluded.text_uuid AND tll_excluded.label_uuid IN ({placeholders})"
+        params.extend(excluded_labels)
 
-    # Modify the query based on whether a label_uuid has been found
-    if label_uuid:
-        cursor.execute("""
-            SELECT e.text_uuid, e.embedding, e.char_start, e.char_end
-            FROM embeddings e
-            INNER JOIN cluster_label_link cll ON e.text_uuid = cll.text_uuid
-            WHERE cll.label_uuid = ?
-        """, (label_uuid,))
-    else:
-        cursor.execute("SELECT text_uuid, embedding, char_start, char_end FROM embeddings")
+    # params.append(model_uuid)
+
+    # # Prepare the SQL query
+    # query = f"""
+    #     SELECT e.text_uuid, e.embedding, e.char_start, e.char_end
+    #     FROM embeddings e
+    #     {include_condition}
+    #     {exclude_condition}
+    #     WHERE e.model_uuid = ?  -- Filter by model_uuid
+    # """
+
+    where_clauses = []
+    if excluded_labels:
+        where_clauses.append(f"tll_excluded.label_uuid IS NULL")
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+
+    if included_labels:
+        query += " GROUP BY e.text_uuid HAVING COUNT(DISTINCT tll_included.label_uuid) = ?"
+        params.append(len(included_labels))
+
+    # Execute the SQL query
+    cursor.execute(query, params)
 
     corpus_embeddings = []
     text_uuids = []
@@ -818,9 +834,12 @@ def search_embeddings(conn, query_embedding: torch.Tensor, top_k: int = 5, inclu
         char_starts.append(char_start)
         char_ends.append(char_end)
 
+    if not corpus_embeddings:
+        return []
+
     corpus_embeddings_tensor = torch.stack(corpus_embeddings)
     cos_scores = util.cos_sim(query_embedding, corpus_embeddings_tensor)[0]
-    top_results = torch.topk(cos_scores, k=top_k)
+    top_results = torch.topk(cos_scores, k=min(top_k, len(corpus_embeddings)))
 
     similar_entries = []
     for score, idx in zip(top_results[0], top_results[1]):
@@ -886,7 +905,7 @@ def perform_search(db_path: str, model_name: str, query: str, top_k: int = 5, in
     query_embedding = compute_query_embedding(model_name, query)
     
     # Modify the search function to filter by included and excluded labels
-    similar_entries = search_embeddings(conn, query_embedding, top_k, included_labels, excluded_labels)
+    similar_entries = search_embeddings(conn, query_embedding, model_name, top_k, included_labels, excluded_labels)
     conn.close()
     return similar_entries
 
