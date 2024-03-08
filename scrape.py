@@ -376,9 +376,19 @@ class CaliforniaScraper(SeleniumScraper):
             element = driver.find_element(By.ID, "manylawsections")
             elements = element.find_elements(By.TAG_NAME, 'a')
 
+            hrefs = []
             for link in elements:
-                result = self.process_link(link.get_attribute("href"), url, driver)
-                self.insert_law_entry(self.db_file, result)
+                href = link.get_attribute("href")
+                hrefs.append(href)
+            for ref in hrefs:
+                # logging.info(ref)
+                # result = self.process_link(ref, url, driver)
+                # self.insert_law_entry(self.db_file, result)
+                result = self.process_link_with_timeout_and_retry(ref, url, driver)
+                if result is not None:
+                    self.insert_law_entry(self.db_file, result)
+                else:
+                    logging.error("COULD NOT SCRAPE: {url}")
             
             # with ThreadPoolExecutor(max_workers=5) as executor:
             #     futures = [executor.submit(self.process_link, link.get_attribute("href"), url) for link in elements]
@@ -409,6 +419,39 @@ class CaliforniaScraper(SeleniumScraper):
             self.driver_pool.release_driver(driver)
         return expanded_links, manylaw_links
 
+    def process_link_with_timeout_and_retry(self, link, url, driver=None, timeout=60, max_retries=3):
+        """
+        Processes a single link with timeout and retry logic.
+
+        Args:
+            link (str): The link to process.
+            url (str): The URL of the page containing the link.
+            driver (WebDriver): The WebDriver instance to use (optional).
+            timeout (int): The timeout in seconds for each attempt (default: 60).
+            max_retries (int): The maximum number of retries (default: 3).
+
+        Returns:
+            dict: The result dictionary from processing the link.
+        """
+        if driver is None:
+            driver = self.driver_pool.get_driver()
+
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(self.process_link, link, url, driver)
+                    result = future.result(timeout=timeout)
+                    return result
+            except Exception as e:
+                retry_count += 1
+                logging.error(f"Exception in process_link_with_timeout_and_retry for Link: {link}, Retry: {retry_count}, Error: {e}")
+                if retry_count == max_retries:
+                    raise
+                time.sleep(5)  # Wait for a short time before retrying
+
+        return None
+
     def process_link(self, link, url, driver=None):
         """Process a single link and return details as a dictionary."""
         if driver is None:
@@ -418,6 +461,7 @@ class CaliforniaScraper(SeleniumScraper):
             js_code = link.split(":", 1)[1] if ":" in link else link
             driver.execute_script(js_code)
             current_url = driver.current_url
+            logging.info(f"PROCESS: {current_url}")
             WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "codeLawSectionNoHead")))
             e = driver.find_element(By.ID, "codeLawSectionNoHead")
             top_level_divs = e.find_elements(By.XPATH, "./div")
@@ -487,8 +531,8 @@ class CaliforniaScraper(SeleniumScraper):
         except Exception as e:
             logging.error(f"Exception in process_url for Url: {url}: {e}")
             logging.error(f"Exception in process_url for Link: {current_url}: {e}")
-        finally:
-            self.driver_pool.release_driver(driver)
+        # finally:
+        #     self.driver_pool.release_driver(driver)
         return result
 
 class OhioScraper(SeleniumScraper):
