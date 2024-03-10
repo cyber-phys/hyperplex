@@ -10,7 +10,7 @@
         - 
 3. [Arizona](https://www.azleg.gov/arstitle/)
 4. [Arkansas](https://advance.lexis.com/container?config=00JAA3ZTU0NTIzYy0zZDEyLTRhYmQtYmRmMS1iMWIxNDgxYWMxZTQKAFBvZENhdGFsb2cubRW4ifTiwi5vLw6cI1uX&crid=0375d312-65ea-48d1-8162-7a7000cae362)
-5. California
+~~5. California~~
 6. [Colorado](https://leg.colorado.gov/agencies/office-legislative-legal-services/2023-crs-titles-download)
 7. Connecticut
 8. Delaware

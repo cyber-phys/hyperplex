@@ -698,6 +698,8 @@ def compute_query_embedding(model_name: str, query: str) -> torch.Tensor:
     """
     Compute the embedding for a query using the specified model.
     """
+    if model_name == "qa-mpnet-base":
+        model_name = "multi-qa-mpnet-base-dot-v1"
     model = SentenceTransformer(model_name, device="cpu")
     query_embedding = model.encode(query, convert_to_tensor=True)
     return query_embedding
@@ -777,7 +779,7 @@ def search_embeddings(conn, query_embedding: torch.Tensor, model_name: str, top_
         list: A list of tuples containing the law entry UUIDs and their corresponding similarity scores.
     """
     cursor = conn.cursor()
-    cursor.execute("SELECT uuid FROM nlp_model WHERE model = ?", (model_name,))
+    cursor.execute("SELECT uuid FROM nlp_model WHERE label = ?", (model_name,))
     model_row = cursor.fetchone()
     if not model_row:
         print(f"No model found with name '{model_name}'.")
@@ -785,36 +787,28 @@ def search_embeddings(conn, query_embedding: torch.Tensor, model_name: str, top_
     model_uuid = model_row[0]
 
     # Build the SQL query dynamically based on included and excluded labels
-    include_condition = ""
-    exclude_condition = ""
+    query = f"""
+        SELECT e.text_uuid, e.embedding, e.char_start, e.char_end
+        FROM embeddings e
+    """
+
     params = []
 
     if included_labels:
         placeholders = ','.join('?' for _ in included_labels)
-        include_condition = f"INNER JOIN text_label_link tll_included ON e.text_uuid = tll_included.text_uuid AND tll_included.label_uuid IN ({placeholders})"
+        query += f"INNER JOIN text_label_link tll_included ON e.text_uuid = tll_included.text_uuid AND tll_included.label_uuid IN ({placeholders})"
         params.extend(included_labels)
 
     if excluded_labels:
         placeholders = ','.join('?' for _ in excluded_labels)
-        exclude_condition = f"LEFT JOIN text_label_link tll_excluded ON e.text_uuid = tll_excluded.text_uuid AND tll_excluded.label_uuid IN ({placeholders})"
+        query += f"LEFT JOIN text_label_link tll_excluded ON e.text_uuid = tll_excluded.text_uuid AND tll_excluded.label_uuid IN ({placeholders})"
         params.extend(excluded_labels)
 
+    query += " WHERE e.model_uuid = ?"
     params.append(model_uuid)
 
-    # Prepare the SQL query
-    query = f"""
-        SELECT e.text_uuid, e.embedding, e.char_start, e.char_end
-        FROM embeddings e
-        {include_condition}
-        {exclude_condition}
-        WHERE e.model_uuid = ?  -- Filter by model_uuid
-    """
-
-    where_clauses = []
     if excluded_labels:
-        where_clauses.append(f"tll_excluded.label_uuid IS NULL")
-    if where_clauses:
-        query += " WHERE " + " AND ".join(where_clauses)
+        query += " AND tll_excluded.label_uuid IS NULL"
 
     if included_labels:
         query += " GROUP BY e.text_uuid HAVING COUNT(DISTINCT tll_included.label_uuid) = ?"
