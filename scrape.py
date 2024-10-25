@@ -57,7 +57,7 @@ class CustomWebDriver(Chrome):
         chrome_options.add_argument("--disable-dev-shm-usage")
         return chrome_options
 
-    def safe_get(self, url, attempts=5, backoff=5):
+    def safe_get(self, url, attempts=25, backoff=240):
         """
         Attempts to navigate to a URL using a Selenium WebDriver. If the page load times out,
         it retries the operation, backing off for a specified amount of time between attempts.
@@ -73,7 +73,7 @@ class CustomWebDriver(Chrome):
         current_attempt = 1
         while current_attempt <= attempts:
             try:
-                time.sleep(random.randint(0, 5))
+                time.sleep(random.randint(0, 10))
                 self.get(url)
                 return  # If successful, exit the function
             except Exception as e:
@@ -281,36 +281,37 @@ class CaliforniaScraper(SeleniumScraper):
         self.processed_manylaw_links = set()
         self.manylaw_executor = ThreadPoolExecutor(max_workers=5)
         self.base_urls = [
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CIV",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CCP",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=COM",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CORP",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EDC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=ELEC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EVID",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAM",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FIN",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FGC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=GOV",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HNC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HSC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=INS",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=LAB",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=MVC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PEN",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PROB",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PCC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PRC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PUC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=RTC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=SHC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=UIC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=VEH",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
-            "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"
+            "https://leginfo.legislature.ca.gov/faces/codes_displayText.xhtml?lawCode=EDC&division=2.&title=2.&part=20.&chapter=3.&article=10.&op_statues=2016&op_chapter=533&op_section=2",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CIV",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=BPC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CCP",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=COM",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CORP",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EDC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=ELEC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=EVID",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAM",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FIN",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FGC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=FAC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=GOV",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HNC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=HSC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=INS",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=LAB",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=MVC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PEN",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PROB",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PCC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PRC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=PUC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=RTC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=SHC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=UIC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=VEH",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WAT",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=WIC",
+            # "https://leginfo.legislature.ca.gov/faces/codedisplayexpand.xhtml?tocCode=CONS"
             ]
         
     def start_scraping(self):
@@ -454,6 +455,7 @@ class CaliforniaScraper(SeleniumScraper):
 
     def process_link(self, link, url, driver=None):
         """Process a single link and return details as a dictionary."""
+        result = None
         if driver is None:
             driver = self.driver_pool.get_driver()
         try:
@@ -529,8 +531,23 @@ class CaliforniaScraper(SeleniumScraper):
                     else:
                         print(f"ERROR law is blank for url: {current_url}\n")
         except Exception as e:
-            logging.error(f"Exception in process_url for Url: {url}: {e}")
-            logging.error(f"Exception in process_url for Link: {current_url}: {e}")
+            try: 
+                sfm = driver.find_element(By.ID, "selectFromMultiples")
+                table = sfm.find_element(By.TAG_NAME, "table")
+                elements = table.find_elements(By.TAG_NAME, 'a')
+                meta_url = current_url
+                hrefs = []
+                for l in elements:
+                    href = link.get_attribute("href")
+                    hrefs.append(href)
+                for ref in hrefs:
+                    result_1 = self.process_link_with_timeout_and_retry(ref, meta_url, driver)
+                    if result_1 is not None:
+                        self.insert_law_entry(self.db_file, result_1)
+
+            except:
+                logging.error(f"Exception in process_url for Url: {url}: {e}")
+                logging.error(f"Exception in process_url for Link: {current_url}: {e}")
         # finally:
         #     self.driver_pool.release_driver(driver)
         return result
