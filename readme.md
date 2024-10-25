@@ -1,5 +1,7 @@
 # Legal Ontology
 
+completly undocumented -- but maybe you'll find something burried here ? 
+
 Note: We are using Lamda Stack on production/dev server
 
 Setup Python Venv
