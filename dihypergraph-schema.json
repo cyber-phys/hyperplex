@@ -1,5 +1,5 @@
 {
-    "title": "Directed Hypergraph JSON Schema",
+    "title": "Directed Hypergraph Olog JSON Schema",
     "type": "object",
     "properties": {
       "nodes": {

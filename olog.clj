@@ -161,5 +161,19 @@
         (println "Processing complete."))
       (println "No PDF URL provided."))))
 
+(defn heal [pair.x pair.y]
+  (let [response (client/post "https://api.openai.com/v1/chat/completions"
+                              {:headers {"Content-Type" "application/json"
+                                         "Authorization" (str "Bearer " openai-api-key)}
+                               :body (json/generate-string {:model "gpt-4-1106-preview"
+                                                            :messages [{:role "system"
+                                                                        :content "From this pair of inputs please determin if the they are refering to the same concept if so you can merge them into one concept"}
+                                                                       {:role "user"
+                                                                        :content user-input}]
+                                                            :max_tokens 4000})
+                               :throw false})]
+  )
+)
+
 (when (not (:gen-class *ns*))
   (apply -main *command-line-args*))

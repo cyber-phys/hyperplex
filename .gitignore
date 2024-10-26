@@ -4,3 +4,4 @@ __pycache__/
 *.log
 *.db
 *.db-journal
+.DS_Store
